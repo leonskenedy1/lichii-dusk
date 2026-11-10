@@ -1742,7 +1742,9 @@ void Device::RemoveUnsuitableExtensions() {
     {
         LOG_INFO(Render_Vulkan, "VK_KHR_cooperative_matrix advertised by physical device: {}", extensions.cooperative_matrix);
         
-        const auto shapes = physical.GetCooperativeMatrixPropertiesKHR();
+        const auto shapes = extensions.cooperative_matrix
+            ? physical.GetCooperativeMatrixPropertiesKHR()
+            : decltype(physical.GetCooperativeMatrixPropertiesKHR()){};
         const auto has_shape = [&](u32 columns) {
             return std::ranges::any_of(shapes, [=](const VkCooperativeMatrixPropertiesKHR& shape) {
                 return shape.MSize == 16 && shape.NSize == columns && shape.KSize == 16 &&
