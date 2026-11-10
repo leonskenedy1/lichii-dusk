@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
@@ -1395,14 +1396,22 @@ void BufferCache<P>::BindHostGraphicsUniformBuffer(size_t stage, u32 index, u32 
             return alignment > 1 && (offset % alignment) != 0;
         }
     }();
-    // Native programs keep tables next to their code in a 64 KiB bank read with indirect offsets
-    // (Splatoon Raiders: the dialogue box corners in c1). Writes to that memory can go unnoticed by
-    // the memory tracker, leaving stale host contents, so upload such a bank again once per frame.
-    if (has_host_buffer && (*channel_state->uniform_buffer_sizes)[stage][index] == 0x10000 &&
-        size != 0 && gpu_memory != nullptr && gpu_memory->UsesNativeTiling() &&
-        (Nx2Perf::Verify() || !native_indirect_uniforms_this_frame.contains(device_addr)) &&
+    // Native programs keep tables next to their code in a 64 KiB bank read with indirect offsets.
+    // Writes to that memory can go unnoticed by the memory tracker. Re-upload on every bind by
+    // default: once per frame can leave per-draw data stale when the game rewrites the bank between
+    // draws (intermittent white material flashes). Set EDEN_NX2_BANK_REUPLOAD=1 for once per frame,
+    // or =0 to disable this workaround, for A/B testing.
+    static const char bank_mode = [] {
+    const char* value = std::getenv("EDEN_NX2_BANK_REUPLOAD");
+    return value != nullptr ? value[0] : '2';
+    }();
+    if (bank_mode != '0' && has_host_buffer &&
+        (*channel_state->uniform_buffer_sizes)[stage][index] == 0x10000 && size != 0 &&
+        gpu_memory != nullptr && gpu_memory->UsesNativeTiling() &&
         !memory_tracker.IsRegionGpuModified(device_addr, size) &&
-        native_indirect_uniforms_this_frame.insert(device_addr).second) {
+        (bank_mode == '2' ||
+         (Nx2Perf::Verify() || !native_indirect_uniforms_this_frame.contains(device_addr)) &&
+             native_indirect_uniforms_this_frame.insert(device_addr).second)) {
         // The bank size is only an upper limit: stop at the end of the mapped memory.
         u64 mapped_size = 0;
         while (mapped_size < size &&
