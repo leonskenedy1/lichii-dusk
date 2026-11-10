@@ -1410,8 +1410,8 @@ void BufferCache<P>::BindHostGraphicsUniformBuffer(size_t stage, u32 index, u32 
         gpu_memory != nullptr && gpu_memory->UsesNativeTiling() &&
         !memory_tracker.IsRegionGpuModified(device_addr, size) &&
         (bank_mode == '2' ||
-         (Nx2Perf::Verify() || !native_indirect_uniforms_this_frame.contains(device_addr)) &&
-             native_indirect_uniforms_this_frame.insert(device_addr).second)) {
+         ((Nx2Perf::Verify() || !native_indirect_uniforms_this_frame.contains(device_addr)) &&
+             native_indirect_uniforms_this_frame.insert(device_addr).second))) {
         // The bank size is only an upper limit: stop at the end of the mapped memory.
         u64 mapped_size = 0;
         while (mapped_size < size &&
