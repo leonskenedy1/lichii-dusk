@@ -1319,7 +1319,11 @@ void TexturePass(Environment& env, IR::Program& program, const HostTranslateInfo
                 const IR::U32 y{ir.CompositeExtract(coords, 1)};
                 inst->SetArg(1, ir.CompositeConstruct(ir.ShiftRightArithmetic(x, ir.Imm32(2)), y));
             }
+            // For typed storage images, the SPIR-V sampled scalar type must match the
+            // declared image format. The backing surface can use a different numeric format
+            // (for example, raw R32_UINT image writes into a floating-point surface).
             const bool is_integer{flags.image_byte_address != 0 ||
+                                  flags.image_format != ImageFormat::Typeless ||
                                   is_texture_pixel_format_integer(cbuf)};
             if (flags.type == TextureType::Buffer) {
                 index = descriptors.Add(ImageBufferDescriptor{
