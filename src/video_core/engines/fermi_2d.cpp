@@ -126,10 +126,18 @@ void Fermi2D::Blit() {
         }
     }
 
+    // Fermi2D's accelerated and software paths below operate on 2D surfaces only. The
+    // UNIMPLEMENTED_IF_MSG macro reports unsupported hardware modes but deliberately continues
+    // execution; continuing with a depth>1 surface would therefore reinterpret a 3D image as a
+    // 2D copy and can overwrite unrelated data. Leave such a surface untouched until a real 3D
+    // blit implementation is available. The opt-in diagnostic snapshot above records the case.
+    if (regs.src.depth != 1 || regs.dst.depth != 1) {
+        return;
+    }
+
     UNIMPLEMENTED_IF_MSG(regs.operation != Operation::SrcCopy, "Operation is not copy");
     UNIMPLEMENTED_IF_MSG(regs.src.layer != 0, "Source layer is not zero");
     UNIMPLEMENTED_IF_MSG(regs.dst.layer != 0, "Destination layer is not zero");
-    UNIMPLEMENTED_IF_MSG(regs.src.depth != 1, "Source depth is not one");
     UNIMPLEMENTED_IF_MSG(regs.clip_enable != 0, "Clipped blit enabled");
 
     const auto& args = regs.pixels_from_memory;
