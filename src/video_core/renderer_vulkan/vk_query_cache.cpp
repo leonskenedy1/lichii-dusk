@@ -38,6 +38,59 @@ using Tegra::Engines::Maxwell3D;
 using VideoCommon::QueryType;
 
 namespace {
+// vkCmdCopyBuffer forbids overlapping destination regions in a single call. Synchronization
+// values are accumulated in guest order and can target the same CPU-buffer bytes more than once;
+// preserve the guest's last-write-wins result by subtracting all later destination ranges from
+// earlier copies before submitting the Vulkan command.
+std::vector<VkBufferCopy> MakeNonOverlappingDestinationCopies(
+    std::span<const VkBufferCopy> copies) {
+    using Range = std::pair<VkDeviceSize, VkDeviceSize>;
+    std::vector<VkBufferCopy> result;
+    std::vector<Range> later_writes;
+
+    for (size_t index = copies.size(); index-- > 0;) {
+        const VkBufferCopy& copy = copies[index];
+        if (copy.size == 0) {
+            continue;
+        }
+        const VkDeviceSize begin = copy.dstOffset;
+        const VkDeviceSize end = begin + copy.size;
+        std::vector<Range> remaining{{begin, end}};
+
+        for (const auto& later : later_writes) {
+            std::vector<Range> next;
+            for (const auto& segment : remaining) {
+                if (later.second <= segment.first || later.first >= segment.second) {
+                    next.push_back(segment);
+                    continue;
+                }
+                if (segment.first < later.first) {
+                    next.emplace_back(segment.first, later.first);
+                }
+                if (later.second < segment.second) {
+                    next.emplace_back(later.second, segment.second);
+                }
+            }
+            remaining = std::move(next);
+            if (remaining.empty()) {
+                break;
+            }
+        }
+
+        for (const auto& segment : remaining) {
+            result.push_back(VkBufferCopy{
+                .srcOffset = copy.srcOffset + (segment.first - begin),
+                .dstOffset = segment.first,
+                .size = segment.second - segment.first,
+            });
+        }
+        if (copy.size != 0) {
+            later_writes.emplace_back(begin, end);
+        }
+    }
+    return result;
+}
+
 class SamplesQueryBank : public VideoCommon::BankBase {
 public:
     static constexpr size_t BANK_SIZE = 256;
@@ -1749,10 +1802,17 @@ void QueryCacheRuntime::SyncValues(std::span<SyncValuesType> values, VkBuffer ba
     }
 
     impl->scheduler.RequestOutsideRenderPassOperationContext();
-    impl->scheduler.Record([src_buffer, dst_buffers = std::move(impl->buffers_to_upload_to), vk_copies = std::move(impl->copies_setup)](vk::CommandBuffer cmdbuf) {
-        size_t size = dst_buffers.size();
+    impl->scheduler.Record([src_buffer, dst_buffers = std::move(impl->buffers_to_upload_to),
+                             vk_copies = std::move(impl->copies_setup)](vk::CommandBuffer cmdbuf) {
+        const size_t size = dst_buffers.size();
         for (size_t i = 0; i < size; i++) {
-            cmdbuf.CopyBuffer(src_buffer, dst_buffers[i].first, vk_copies[i]);
+            const auto& copies = vk_copies[i];
+            const auto non_overlapping = MakeNonOverlappingDestinationCopies(
+                {copies.data(), copies.size()});
+            if (!non_overlapping.empty()) {
+                cmdbuf.CopyBuffer(src_buffer, dst_buffers[i].first,
+                                  {non_overlapping.data(), non_overlapping.size()});
+            }
         }
     });
 }

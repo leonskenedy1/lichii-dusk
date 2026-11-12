@@ -1441,10 +1441,10 @@ void GraphicsPipeline::MakePipeline(VkRenderPass render_pass) {
         };
         dynamic_states.insert(dynamic_states.end(), extended.begin(), extended.end());
 
-        // VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT
-        if (!key.state.dynamic_vertex_input) {
-            dynamic_states.push_back(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT);
-        }
+        // BufferCacheRuntime binds vertex buffers with vkCmdBindVertexBuffers2EXT and a
+        // non-null pStrides array. That command requires this dynamic state even when the
+        // pipeline also uses VK_DYNAMIC_STATE_VERTEX_INPUT_EXT.
+        dynamic_states.push_back(VK_DYNAMIC_STATE_VERTEX_INPUT_BINDING_STRIDE_EXT);
     }
 
     // VK_DYNAMIC_STATE_VERTEX_INPUT_EXT

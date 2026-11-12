@@ -413,6 +413,9 @@ constexpr std::array<VkFormat, 2> OpaqueAstcViewFormats{VK_FORMAT_BC1_RGBA_UNORM
     }
     if (info.type == ImageType::e3D) {
         flags |= VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT;
+        if (device.IsImage2DViewOf3DSupported()) {
+            flags |= VK_IMAGE_CREATE_2D_VIEW_COMPATIBLE_BIT_EXT;
+        }
     }
     const auto [samples_x, samples_y] = VideoCommon::SamplesLog2(info.num_samples);
     const bool allow_storage =
@@ -493,7 +496,8 @@ constexpr std::array<VkFormat, 2> OpaqueAstcViewFormats{VK_FORMAT_BC1_RGBA_UNORM
 }
 
 [[nodiscard]] vk::ImageView MakeStorageView(const vk::Device& device, u32 level, VkImage image,
-                                            VkFormat format, u32 base_layer = 0,
+                                            VkFormat format, VkImageViewType view_type,
+                                            u32 base_layer = 0,
                                             u32 layer_count = VK_REMAINING_ARRAY_LAYERS) {
     static constexpr VkImageViewUsageCreateInfo storage_image_view_usage_create_info{
         .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_USAGE_CREATE_INFO,
@@ -505,7 +509,7 @@ constexpr std::array<VkFormat, 2> OpaqueAstcViewFormats{VK_FORMAT_BC1_RGBA_UNORM
         .pNext = &storage_image_view_usage_create_info,
         .flags = 0,
         .image = image,
-        .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY,
+        .viewType = view_type,
         .format = format,
         .components{
             .r = VK_COMPONENT_SWIZZLE_IDENTITY,
@@ -917,7 +921,8 @@ void CopyBufferToImage(vk::CommandBuffer cmdbuf, VkBuffer src_buffer, VkImage im
             .subresourceRange = subresource_range,
     };
 
-    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
+    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
+                           VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
                            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
                            read_barrier);
@@ -925,6 +930,7 @@ void CopyBufferToImage(vk::CommandBuffer cmdbuf, VkBuffer src_buffer, VkImage im
     // TODO: Move this to another API
     cmdbuf.PipelineBarrier(
             VK_PIPELINE_STAGE_TRANSFER_BIT,
+            VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
             VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT |
             VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT |
             VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -2961,8 +2967,11 @@ Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu
         const auto& device = runtime->device.GetLogical();
         const VkFormat storage_format = VK_FORMAT_A8B8G8R8_UNORM_PACK32;
         for (s32 level = 0; level < host_levels; ++level) {
+            const VkImageViewType view_type = info.resources.layers > 1
+                                                  ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                  : VK_IMAGE_VIEW_TYPE_2D;
             storage_image_views[level] =
-                MakeStorageView(device, level, *original_image, storage_format);
+                MakeStorageView(device, level, *original_image, storage_format, view_type);
         }
     }
 }
@@ -3387,8 +3396,13 @@ VkImageView Image::StorageImageView(s32 level) noexcept {
         if (WillUseAcceleratedAstcDecode(runtime->device, info)) {
             format_info.format = VK_FORMAT_A8B8G8R8_UNORM_PACK32;
         }
+        const VkImageViewType view_type =
+            info.type == ImageType::e3D
+                ? VK_IMAGE_VIEW_TYPE_3D
+                : (info.resources.layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                             : VK_IMAGE_VIEW_TYPE_2D);
         view = MakeStorageView(runtime->device.GetLogical(), level, *(this->*current_image),
-                               format_info.format);
+                               format_info.format, view_type);
     }
     return *view;
 }
@@ -4008,7 +4022,7 @@ VkImageView Image::StorageImageLayerView(s32 level, u32 layer) {
     auto& view = storage_layer_views[static_cast<size_t>(level) * layers + layer];
     if (!view) {
         view = MakeStorageView(runtime->device.GetLogical(), level, *(this->*current_image),
-                               VK_FORMAT_A8B8G8R8_UNORM_PACK32, layer, 1);
+                               VK_FORMAT_A8B8G8R8_UNORM_PACK32, VK_IMAGE_VIEW_TYPE_2D, layer, 1);
     }
     return *view;
 }
@@ -5046,8 +5060,10 @@ void TextureCacheRuntime::TranscodeAstcToBcn(
             .unused_frames = 0,
         };
         for (u32 level = 0; level < levels; ++level) {
-            pending.views.push_back(
-                MakeStorageView(device.GetLogical(), level, *pending.image, DecodeFormat));
+            const VkImageViewType view_type = layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
+                                                          : VK_IMAGE_VIEW_TYPE_2D;
+            pending.views.push_back(MakeStorageView(device.GetLogical(), level, *pending.image,
+                                                    DecodeFormat, view_type));
         }
     }
     astc_decoder_pass->AssembleInto(
