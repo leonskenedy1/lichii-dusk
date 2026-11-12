@@ -1526,6 +1526,19 @@ bool Device::GetSuitability(bool requires_swapchain) {
 }
 
 void Device::RemoveUnsuitableExtensions() {
+    // VK_EXT_image_2d_view_of_3d: image2DViewOf3D is the base feature that enables
+    // the extension's compatible 2D views. sampler2DViewOf3D is an additional capability
+    // used only for sampled-image descriptors.
+    LOG_INFO(Render_Vulkan,
+             "VK_EXT_image_2d_view_of_3d: extension={}, image2DViewOf3D={}, sampler2DViewOf3D={}",
+             extensions.image_2d_view_of_3d,
+             static_cast<bool>(features.image_2d_view_of_3d.image2DViewOf3D),
+             static_cast<bool>(features.image_2d_view_of_3d.sampler2DViewOf3D));
+    extensions.image_2d_view_of_3d = features.image_2d_view_of_3d.image2DViewOf3D;
+    RemoveExtensionFeatureIfUnsuitable(extensions.image_2d_view_of_3d,
+                                       features.image_2d_view_of_3d,
+                                       VK_EXT_IMAGE_2D_VIEW_OF_3D_EXTENSION_NAME);
+
     // VK_EXT_color_write_enable
     extensions.color_write_enable = features.color_write_enable.colorWriteEnable;
     RemoveExtensionFeatureIfUnsuitable(extensions.color_write_enable, features.color_write_enable,

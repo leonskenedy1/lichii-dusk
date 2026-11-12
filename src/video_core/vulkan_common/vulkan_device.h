@@ -68,6 +68,7 @@ VK_DEFINE_HANDLE(VmaPool)
     FEATURE(EXT, ExtendedDynamicState3, EXTENDED_DYNAMIC_STATE_3, extended_dynamic_state3)         \
     FEATURE(EXT, 4444Formats, 4444_FORMATS, format_a4b4g4r4)                                       \
     FEATURE(EXT, IndexTypeUint8, INDEX_TYPE_UINT8, index_type_uint8)                               \
+    FEATURE(EXT, Image2DViewOf3D, IMAGE_2D_VIEW_OF_3D, image_2d_view_of_3d)                        \
     FEATURE(EXT, LineRasterization, LINE_RASTERIZATION, line_rasterization)                        \
     FEATURE(EXT, MeshShader, MESH_SHADER, mesh_shader)                                             \
     FEATURE(EXT, PrimitiveTopologyListRestart, PRIMITIVE_TOPOLOGY_LIST_RESTART,                    \
@@ -346,6 +347,23 @@ public:
 
     bool IsSparseBindingSupported() const {
         return features.features.sparseBinding && graphics_family_sparse_binding;
+    }
+
+    /// Whether this device supports sampling a 2D view of a 3D image.
+    bool IsSampler2DViewOf3DSupported() const {
+        return extensions.image_2d_view_of_3d &&
+               features.image_2d_view_of_3d.sampler2DViewOf3D;
+    }
+
+    /// Whether this device supports storage-image access through a 2D view of a 3D image.
+    bool IsStorageImage2DViewOf3DSupported() const {
+        return extensions.image_2d_view_of_3d && features.image_2d_view_of_3d.image2DViewOf3D;
+    }
+
+    /// Whether 3D images may be created with VK_IMAGE_CREATE_2D_VIEW_COMPATIBLE_BIT_EXT.
+    bool IsImage2DViewOf3DSupported() const {
+        return extensions.image_2d_view_of_3d &&
+               features.image_2d_view_of_3d.image2DViewOf3D;
     }
 
     /// 2D images whose memory can be bound in parts, on the graphics queue.
