@@ -2967,11 +2967,10 @@ Image::Image(TextureCacheRuntime& runtime_, const ImageInfo& info_, GPUVAddr gpu
         const auto& device = runtime->device.GetLogical();
         const VkFormat storage_format = VK_FORMAT_A8B8G8R8_UNORM_PACK32;
         for (s32 level = 0; level < host_levels; ++level) {
-            const VkImageViewType view_type = info.resources.layers > 1
-                                                  ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
-                                                  : VK_IMAGE_VIEW_TYPE_2D;
-            storage_image_views[level] =
-                MakeStorageView(device, level, *original_image, storage_format, view_type);
+            // astc_decoder.comp always declares image2DArray, including one-layer images.
+            // A 2D view is not compatible with an OpTypeImage whose Arrayed operand is true.
+            storage_image_views[level] = MakeStorageView(
+                device, level, *original_image, storage_format, VK_IMAGE_VIEW_TYPE_2D_ARRAY);
         }
     }
 }
@@ -4021,8 +4020,11 @@ VkImageView Image::StorageImageLayerView(s32 level, u32 layer) {
     }
     auto& view = storage_layer_views[static_cast<size_t>(level) * layers + layer];
     if (!view) {
+        // The ASTC decoder shader always declares image2DArray, even when decoding one layer.
+        // Keep layer-specific views arrayed too; baseLayer/layerCount select the single layer.
         view = MakeStorageView(runtime->device.GetLogical(), level, *(this->*current_image),
-                               VK_FORMAT_A8B8G8R8_UNORM_PACK32, VK_IMAGE_VIEW_TYPE_2D, layer, 1);
+                               VK_FORMAT_A8B8G8R8_UNORM_PACK32,
+                               VK_IMAGE_VIEW_TYPE_2D_ARRAY, layer, 1);
     }
     return *view;
 }
@@ -5060,10 +5062,10 @@ void TextureCacheRuntime::TranscodeAstcToBcn(
             .unused_frames = 0,
         };
         for (u32 level = 0; level < levels; ++level) {
-            const VkImageViewType view_type = layers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY
-                                                          : VK_IMAGE_VIEW_TYPE_2D;
+            // The ASTC decoder's destination is always image2DArray; keep this view arrayed
+            // even when the decoded image contains a single layer.
             pending.views.push_back(MakeStorageView(device.GetLogical(), level, *pending.image,
-                                                    DecodeFormat, view_type));
+                                                    DecodeFormat, VK_IMAGE_VIEW_TYPE_2D_ARRAY));
         }
     }
     astc_decoder_pass->AssembleInto(

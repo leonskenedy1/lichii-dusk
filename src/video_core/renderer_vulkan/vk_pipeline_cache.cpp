@@ -952,9 +952,9 @@ void PipelineCache::LoadDiskResources(u64 title_id, std::stop_token stop_loading
     used_pipelines_filename =
         VideoCommon::VersionedPipelineCachePath(base_dir, "vulkan_used", CACHE_VERSION);
     constexpr std::array<char, 8> shader_magic{'y', 'u', 'z', 'u', 'c', 'a', 'c', 'h'};
-    VideoCommon::CopyCompatiblePipelineCache(
-        VideoCommon::VersionedPipelineCachePath(base_dir, "vulkan", 52), pipeline_cache_filename,
-        shader_magic, 52, CACHE_VERSION);
+    // Do not migrate the v52 shader-environment cache. It predates the current storage-image
+    // sampled-type classification and can reload SPIR-V that declares FLOAT for UINT views.
+    // A fresh v55 cache forces those programs through the current shader recompiler.
     std::error_code migration_error;
     std::filesystem::copy_file(VideoCommon::VersionedPipelineCachePath(base_dir, "vulkan_used", 52),
                                used_pipelines_filename, std::filesystem::copy_options::none,
