@@ -2535,6 +2535,20 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                     (insn.words[3] & 0xc00001ffU))
                     return fail(index, "native uniform array texture gather mode");
             }
+            if (opcode == 0xf63 && !array) {
+                // Non-array TLD4.B with a single AOFFI offset is expressible by Maxwell TLD4.B:
+                // stage the offset in R247, immediately after the bindless handle in R246.
+                const u32 count = static_cast<u32>(std::popcount(mask));
+                const u32 first_count = second_dest == 255 ? count : std::min(count, 2U);
+                const u32 second_count = count - first_count;
+                if (!insn.Bits(60, 1) || source_a == 255 || source_a + 2 > register_limit ||
+                    (offsets && source_b >= register_limit) ||
+                    (dest != 255 && dest + first_count > register_limit) ||
+                    (second_dest != 255 && second_dest + second_count > register_limit) ||
+                    (dest != 255 && second_dest != 255 && second_count != 0 &&
+                     second_dest < dest + first_count && dest < second_dest + second_count))
+                    return fail(index, "native bindless texture gather register range");
+            }
             if (opcode == 0x364 &&
                 (array || offsets || per_tap || depth || half || !insn.Bits(60, 1) ||
                  insn.Bits(40, 19) || insn.Bits(91, 1) || source_a == 255 || source_a + 2 > register_limit))
@@ -2555,7 +2569,9 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                           insn.Bits(91, 1) ||
                           (source_b != 255 && source_b >= register_limit) ||
                           mask != 15 || dest >= register_limit || second_dest >= register_limit)) ||
-                (offsets && (bindless || source_b == 255 || (source_a != 255 && source_a >= 245))) ||
+                (offsets && ((bindless && array) || source_b == 255 ||
+                             (bindless && source_b >= register_limit) ||
+                             (source_a != 255 && source_a >= 245))) ||
                 (per_tap && (bindless || depth || insn.Bits(80, 1) || insn.Bits(91, 1))) ||
                 insn.Bits(89, 1) || mask == 0 ||
                 (bindless ? (handle >= 246 || (opcode == 0xf63 && (insn.Bits(46, 13) || !insn.Bits(91, 1))))
@@ -2691,8 +2707,13 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                      (u64{insn.Bits(90, 1)} << 49) | (u64{depth} << 50) | (u64{7} << 51));
             } else if (bindless) {
                 emit(0x5c98000000000000ULL | predicate | 246 | (u64{15} << 39) | (u64{handle} << 20));
+                if (offsets) {
+                    emit(0x5c98000000000000ULL | predicate | 247 | (u64{15} << 39) |
+                         (u64{source_b} << 20));
+                }
                 emit(0xdec0000000000000ULL | predicate | 250 | (u64{250} << 8) | (u64{246} << 20) |
-                     (u64{array ? 3U : 2U} << 28) | (u64{mask} << 31) | (u64{insn.Bits(87, 2)} << 38) |
+                     (u64{array ? 3U : 2U} << 28) | (u64{mask} << 31) |
+                     (u64{offsets ? 1U : 0U} << 36) | (u64{insn.Bits(87, 2)} << 38) |
                      (u64{insn.Bits(90, 1)} << 49) | (u64{7} << 51));
             } else {
             if (offsets || depth)
