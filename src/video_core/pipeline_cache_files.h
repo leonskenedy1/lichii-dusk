@@ -14,7 +14,9 @@
 namespace VideoCommon {
 
 inline constexpr u32 OpenGLPipelineCacheVersion = 48;
-inline constexpr u32 VulkanPipelineCacheVersion = 54;
+// Bumped after changing storage-image numeric typing in the shader recompiler. Older
+// serialized shader environments can contain SPIR-V with stale FLOAT/UINT image declarations.
+inline constexpr u32 VulkanPipelineCacheVersion = 55;
 
 // Official Eglantine (cache version 18 at c0cb3325) and this fork (a different version) both
 // used <shader dir>/<title>/vulkan.bin and vulkan_pipelines.bin. Each build deletes a file
