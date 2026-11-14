@@ -617,6 +617,47 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
         return false;
     }
 
+    // Trace the host-side descriptor metadata alongside the exact VkImageView handle. This
+    // lets validation reports (which only identify descriptor-set bindings) be correlated with
+    // the view's CREATE_IMAGE_VIEW event and its VkFormat/viewType in the Vulkan trace.
+    if (GPU::Logging::IsDiagnosticTraceEnabled()) {
+        size_t binding_index = Shader::NumDescriptors(info.constant_buffer_descriptors) +
+                               Shader::NumDescriptors(info.storage_buffers_descriptors) +
+                               Shader::NumDescriptors(info.texture_buffer_descriptors) +
+                               Shader::NumDescriptors(info.image_buffer_descriptors) +
+                               Shader::NumDescriptors(info.texture_descriptors);
+        size_t image_view_index = Shader::NumDescriptors(info.texture_buffer_descriptors) +
+                                  Shader::NumDescriptors(info.image_buffer_descriptors) +
+                                  Shader::NumDescriptors(info.texture_descriptors);
+        for (const auto& desc : info.image_descriptors) {
+            for (u32 i = 0; i < desc.count; ++i, ++binding_index, ++image_view_index) {
+                const auto& image_view = texture_cache.GetImageView(views[image_view_index].id);
+                const VkImageView storage_view =
+                    shadow_index && image_view_index == *shadow_index
+                        ? shadow->view
+                        : image_view.StorageView(desc.type, desc.format, desc.is_byte_addressed);
+                const bool relevant_binding = binding_index == 5 || binding_index == 6 ||
+                                               binding_index == 7 || binding_index == 13 ||
+                                               binding_index == 15;
+                if (relevant_binding &&
+                    (!desc.is_integer || desc.format == Shader::ImageFormat::Typeless)) {
+                    vk::diagnostic::Trace(
+                        "COMPUTE_STORAGE_DESCRIPTOR",
+                        "shader_hash={:#018x} binding={} array_index={} texture_type={} "
+                        "image_format={} is_integer={} byte_addressed={} written={} read={} "
+                        "pixel_format={} image_view_type={} cbuf={} offset={:#x} "
+                        "handle_program={} gpu_addr={:#x} view={:#x}",
+                        ShaderHash(), binding_index, i, static_cast<u32>(desc.type),
+                        static_cast<u32>(desc.format), desc.is_integer, desc.is_byte_addressed,
+                        desc.is_written, desc.is_read, static_cast<u32>(image_view.format),
+                        static_cast<u32>(image_view.type), desc.cbuf_index, desc.cbuf_offset,
+                        desc.handle_program, image_view.GpuAddr(),
+                        vk::diagnostic::HandleBits(storage_view));
+                }
+            }
+        }
+    }
+
     if (!is_built.load(std::memory_order::relaxed)) {
         // Wait for the pipeline to be built
         scheduler.Record([this](vk::CommandBuffer) {

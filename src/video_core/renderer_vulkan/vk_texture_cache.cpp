@@ -4415,11 +4415,12 @@ VkImageView ImageView::StorageView(Shader::TextureType texture_type,
     }
     if (image_handle) {
         if (image_format == Shader::ImageFormat::Typeless) {
-            if (!typeless_storage_view) {
+            auto& view{typeless_storage_views[static_cast<size_t>(texture_type)]};
+            if (!view) {
                 auto info = MaxwellToVK::SurfaceFormat(*device, FormatType::Optimal, true, format);
-                typeless_storage_view = MakeView(info.format, VK_IMAGE_ASPECT_COLOR_BIT, texture_type);
+                view = MakeView(info.format, VK_IMAGE_ASPECT_COLOR_BIT, texture_type);
             }
-            return *typeless_storage_view;
+            return *view;
         }
         if (!storage_views)
             storage_views.emplace();
