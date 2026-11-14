@@ -547,7 +547,7 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
             for (u32 i = 0; i < desc.count; ++i, ++image_index) {
                 if (image_index != *shadow_index) {
                     static_cast<void>(texture_cache.GetImageView(views[image_index].id)
-                        .StorageView(desc.type, desc.format, desc.is_byte_addressed));
+                        .StorageView(desc.type, desc.format, desc.is_byte_addressed, desc.is_integer));
                 }
             }
         }
@@ -603,7 +603,7 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
                 const size_t view_index{static_cast<size_t>(views_it - views.data())};
                 auto& view{texture_cache.GetImageView((views_it++)->id)};
                 const VkImageView storage{view_index == *shadow_index ? shadow->view :
-                    view.StorageView(desc.type, desc.format, desc.is_byte_addressed)};
+                    view.StorageView(desc.type, desc.format, desc.is_byte_addressed, desc.is_integer)};
                 guest_descriptor_queue.AddImage(storage);
                 is_rescaled |= texture_cache.IsRescaling(view);
             }
@@ -635,7 +635,7 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
                 const VkImageView storage_view =
                     shadow_index && image_view_index == *shadow_index
                         ? shadow->view
-                        : image_view.StorageView(desc.type, desc.format, desc.is_byte_addressed);
+                        : image_view.StorageView(desc.type, desc.format, desc.is_byte_addressed, desc.is_integer);
                 const bool relevant_binding = binding_index == 5 || binding_index == 6 ||
                                                binding_index == 7 || binding_index == 13 ||
                                                binding_index == 15;

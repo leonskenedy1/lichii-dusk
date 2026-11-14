@@ -492,12 +492,14 @@ void PresentManager::CopyToSwapchainImpl(Frame* frame) {
             },
         },
     };
-    const std::array post_barriers{
+    const std::array swapchain_post_barriers{
         VkImageMemoryBarrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext = nullptr,
             .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT,
+            // Presentation performs its own memory access. The PRESENT_SRC_KHR transition
+            // must not declare a graphics/memory read in the destination access scope.
+            .dstAccessMask = 0,
             .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -511,6 +513,8 @@ void PresentManager::CopyToSwapchainImpl(Frame* frame) {
                 .layerCount = VK_REMAINING_ARRAY_LAYERS,
             },
         },
+    };
+    const std::array frame_post_barriers{
         VkImageMemoryBarrier{
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .pNext = nullptr,
@@ -545,8 +549,15 @@ void PresentManager::CopyToSwapchainImpl(Frame* frame) {
                          MakeImageCopy(frame->width, frame->height, extent.width, extent.height));
     }
 
-    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, {},
-                           {}, {}, post_barriers);
+    // Transition the acquired swapchain image to PRESENT. Queue presentation provides the
+    // external visibility operation, so this dependency has no destination access mask and
+    // ends at BOTTOM_OF_PIPE rather than ALL_GRAPHICS.
+    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                           {}, {}, {}, swapchain_post_barriers);
+    // The emulated frame image is reused by the renderer, so retain its independent transition
+    // back to GENERAL with the original graphics destination scope.
+    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
+                           {}, {}, {}, frame_post_barriers);
 
     cmdbuf.End();
 

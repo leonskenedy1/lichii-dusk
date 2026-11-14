@@ -4400,7 +4400,8 @@ VkImageView ImageView::ColorView() {
 }
 
 VkImageView ImageView::StorageView(Shader::TextureType texture_type,
-                                   Shader::ImageFormat image_format, bool is_byte_addressed) {
+                                   Shader::ImageFormat image_format, bool is_byte_addressed,
+                                   bool is_integer) {
     if (is_byte_addressed &&
         (texture_type != Shader::TextureType::Color2D ||
          image_format != Shader::ImageFormat::R32_UINT ||
@@ -4415,9 +4416,36 @@ VkImageView ImageView::StorageView(Shader::TextureType texture_type,
     }
     if (image_handle) {
         if (image_format == Shader::ImageFormat::Typeless) {
-            auto& view{typeless_storage_views[static_cast<size_t>(texture_type)]};
+            const size_t numeric_index = is_integer ? 1U : 0U;
+            auto& view{typeless_storage_views[numeric_index][static_cast<size_t>(texture_type)]};
             if (!view) {
-                auto info = MaxwellToVK::SurfaceFormat(*device, FormatType::Optimal, true, format);
+                VideoCore::Surface::PixelFormat view_format = format;
+                // Dynamic texture handles are conservatively emitted as floating-point images by
+                // the shader recompiler. Build 11's trace confirmed that this shader path binds
+                // R32_UINT guest images while its SPIR-V OpTypeImage uses a float Sampled Type.
+                // R32_UINT and R32_FLOAT are in Vulkan's same 32-bit view-compatibility class;
+                // use an R32_SFLOAT view to make the descriptor numeric type match SPIR-V while
+                // preserving the underlying 32-bit payload (no numeric conversion is performed).
+                if (!is_integer && format == VideoCore::Surface::PixelFormat::R32_UINT &&
+                    device->IsKhrImageFormatListSupported() &&
+                    VideoCore::Surface::IsViewCompatible(
+                        format, VideoCore::Surface::PixelFormat::R32_FLOAT, false, true)) {
+                    const VkFormat float_format =
+                        MaxwellToVK::SurfaceFormat(*device, FormatType::Optimal, true,
+                                                   VideoCore::Surface::PixelFormat::R32_FLOAT)
+                            .format;
+                    if (device->IsFormatSupported(float_format,
+                                                  VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT,
+                                                  FormatType::Optimal)) {
+                        view_format = VideoCore::Surface::PixelFormat::R32_FLOAT;
+                    } else {
+                        LOG_WARNING(Render_Vulkan,
+                                    "R32_UINT typeless storage image requires an R32_FLOAT view, "
+                                    "but the device does not support it; using the native format");
+                    }
+                }
+                const auto info =
+                    MaxwellToVK::SurfaceFormat(*device, FormatType::Optimal, true, view_format);
                 view = MakeView(info.format, VK_IMAGE_ASPECT_COLOR_BIT, texture_type);
             }
             return *view;

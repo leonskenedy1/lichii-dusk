@@ -420,7 +420,7 @@ inline void PushImageDescriptors(TextureCache& texture_cache,
         for (u32 index = 0; index < desc.count; ++index) {
             ImageView& image_view{texture_cache.GetImageView((views++)->id)};
             const VkImageView vk_image_view{
-                image_view.StorageView(desc.type, desc.format, desc.is_byte_addressed)};
+                image_view.StorageView(desc.type, desc.format, desc.is_byte_addressed, desc.is_integer)};
             if (desc.is_written) {
                 texture_cache.MarkModification(image_view.image_id);
             }

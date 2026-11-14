@@ -716,7 +716,8 @@ public:
     [[nodiscard]] VkImageView ColorView();
 
     [[nodiscard]] VkImageView StorageView(Shader::TextureType texture_type,
-                                          Shader::ImageFormat image_format, bool is_byte_addressed);
+                                          Shader::ImageFormat image_format, bool is_byte_addressed,
+                                          bool is_integer = true);
 
     [[nodiscard]] bool IsRescaled() const noexcept;
 
@@ -782,7 +783,10 @@ private:
 
     std::array<vk::ImageView, Shader::NUM_TEXTURE_TYPES> image_views;
     std::optional<StorageViews> storage_views;
-    std::array<vk::ImageView, Shader::NUM_TEXTURE_TYPES> typeless_storage_views;
+    // Typeless images can be exposed through different numeric interpretations. Keep the
+    // integer and floating-point VkImageViews separate so a dynamic handle cannot reuse a view
+    // whose format numeric type disagrees with the shader's OpTypeImage Sampled Type.
+    std::array<std::array<vk::ImageView, Shader::NUM_TEXTURE_TYPES>, 2> typeless_storage_views;
     vk::ImageView depth_view;
     vk::ImageView stencil_view;
     vk::ImageView color_view;
