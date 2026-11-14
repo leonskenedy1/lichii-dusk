@@ -4,6 +4,10 @@
 // SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include "common/logging.h"
 #include "core/frontend/emu_window.h"
 #include "video_core/vulkan_common/vulkan_surface.h"
@@ -20,8 +24,14 @@ vk::SurfaceKHR CreateSurface(
 #ifdef _WIN32
     if (window_info.type == Core::Frontend::WindowSystemType::Windows) {
         const HWND hWnd = static_cast<HWND>(window_info.render_surface);
-        const VkWin32SurfaceCreateInfoKHR win32_ci{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR,
-                                                   nullptr, 0, nullptr, hWnd};
+        const HINSTANCE hinstance = GetModuleHandleW(nullptr);
+        if (!hWnd || !hinstance) {
+            LOG_ERROR(Render_Vulkan,
+                      "Failed to initialize Win32 surface: HWND or process HINSTANCE is null");
+            throw vk::Exception(VK_ERROR_INITIALIZATION_FAILED);
+        }
+        const VkWin32SurfaceCreateInfoKHR win32_ci{
+            VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR, nullptr, 0, hinstance, hWnd};
         const auto vkCreateWin32SurfaceKHR = reinterpret_cast<PFN_vkCreateWin32SurfaceKHR>(
             dld.vkGetInstanceProcAddr(*instance, "vkCreateWin32SurfaceKHR"));
         if (!vkCreateWin32SurfaceKHR ||
