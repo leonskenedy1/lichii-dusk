@@ -126,12 +126,15 @@ void Fermi2D::Blit() {
         }
     }
 
-    // Fermi2D's accelerated and software paths below operate on 2D surfaces only. The
-    // UNIMPLEMENTED_IF_MSG macro reports unsupported hardware modes but deliberately continues
-    // execution; continuing with a depth>1 surface would therefore reinterpret a 3D image as a
-    // 2D copy and can overwrite unrelated data. Leave such a surface untouched until a real 3D
-    // blit implementation is available. The opt-in diagnostic snapshot above records the case.
-    if (regs.src.depth != 1 || regs.dst.depth != 1) {
+    const bool is_volume_blit = regs.src.depth > 1 || regs.dst.depth > 1;
+    if (is_volume_blit &&
+        (regs.operation != Operation::SrcCopy || regs.src.layer != 0 || regs.dst.layer != 0 ||
+         regs.clip_enable != 0)) {
+        LOG_WARNING(HW_GPU,
+                    "Fermi2D: skipping unsupported volume blit (operation={}, src_layer={}, "
+                    "dst_layer={}, clip_enable={})",
+                    static_cast<u32>(regs.operation), regs.src.layer, regs.dst.layer,
+                    static_cast<u32>(regs.clip_enable));
         return;
     }
 
