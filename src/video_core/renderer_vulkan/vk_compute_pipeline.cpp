@@ -631,7 +631,7 @@ bool ComputePipeline::Configure(Tegra::Engines::KeplerCompute& kepler_compute,
                                   Shader::NumDescriptors(info.texture_descriptors);
         for (const auto& desc : info.image_descriptors) {
             for (u32 i = 0; i < desc.count; ++i, ++binding_index, ++image_view_index) {
-                const auto& image_view = texture_cache.GetImageView(views[image_view_index].id);
+                auto& image_view = texture_cache.GetImageView(views[image_view_index].id);
                 const VkImageView storage_view =
                     shadow_index && image_view_index == *shadow_index
                         ? shadow->view
