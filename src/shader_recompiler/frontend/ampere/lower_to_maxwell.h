@@ -939,8 +939,11 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 emit(base(0x5c10000000000000ULL) | (u64{source} << 8) | (u64{250} << 20));
                 break;
             }
-            if (insn.Bits(24, 8) != 255 || insn.Bits(64, 8) != 255 || insn.words[2] != 0x078e00ff) {
+            const bool negated_cbuf_addend = opcode == 0x624 && insn.Bits(63, 1);
+            if (insn.Bits(24, 8) != 255 || insn.Bits(64, 8) != 255 ||
+                insn.words[2] != 0x078e00ff || negated_cbuf_addend) {
                 // 0x624 bit 63 negates the constant-buffer addend, as bit 63 does for 0xe24.
+                // A zero product with a negated addend also takes this path: 0 * 0 - c.
                 const bool negate_c = opcode == 0x624 && insn.Bits(63, 1) != 0;
                 if ((insn.words[2] & ~0x2ffU) != 0x078e0000 || (opcode == 0x624 && insn.Bits(62, 1)))
                     return fail(index, "native multiply wide addend mode");
@@ -2535,10 +2538,17 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                     (insn.words[3] & 0xc00001ffU))
                     return fail(index, "native uniform array texture gather mode");
             }
-            if (opcode == 0x364 &&
-                (array || offsets || per_tap || depth || half || !insn.Bits(60, 1) ||
-                 insn.Bits(40, 19) || insn.Bits(91, 1) || source_a == 255 || source_a + 2 > register_limit))
-                return fail(index, "native register-handle texture gather mode");
+            if (opcode == 0x364) {
+                const u32 components = static_cast<u32>(std::popcount(mask));
+                const bool split = second_dest != 255;
+                const u32 first_count = split ? std::min(components, 2U) : components;
+                if (array || offsets || per_tap || depth || half || !insn.Bits(60, 1) ||
+                    insn.Bits(40, 19) || insn.Bits(76, 5) || insn.Bits(91, 1) || mask == 0 ||
+                    source_a == 255 || source_a + 2 > register_limit || source_b >= register_limit ||
+                    (dest != 255 && dest + first_count > register_limit) ||
+                    (split && (components <= 2 || second_dest + components - 2 > register_limit)))
+                    return fail(index, "native register-handle texture gather mode");
+            }
             if ((insn.Bits(61, 3) != 1 && !array) || (insn.Bits(77, 1) && !per_tap) || insn.Bits(81, 3) != 7 ||
                 insn.Bits(59, 1) != (opcode == 0x364 ? 1U : 0U) ||
                 (depth && (bindless || array || offsets || per_tap || half ||
