@@ -7,6 +7,7 @@
 #pragma once
 
 #include <array>
+#include <string>
 #include <optional>
 #include <vector>
 #include <variant>
@@ -136,5 +137,7 @@ std::variant<std::vector<AddrInfo>, GetAddrInfoError> GetAddressInfo(const std::
 
 /// True when EDEN_NX2_ONLINE_HOSTS redirects this name to the local stand-in servers.
 bool IsOnlineRedirectHost(const std::string& host);
+/// The configured playDB-CNT server endpoint (ip:port), or empty when no server is configured.
+[[nodiscard]] std::string GetOnlineRedirectServer();
 
 } // namespace Network

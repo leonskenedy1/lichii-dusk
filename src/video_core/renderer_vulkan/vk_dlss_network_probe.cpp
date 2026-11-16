@@ -70,6 +70,12 @@ constexpr std::array<VkDescriptorUpdateTemplateEntry, 3> TEMPLATES{{
     },
 }};
 
+constexpr VkPushConstantRange PUSH_CONSTANT_RANGE{
+    .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+    .offset = 0,
+    .size = sizeof(std::array<u32, 2>),
+};
+
 constexpr DescriptorBankInfo BANK_INFO{
     .uniform_buffers = 0,
     .storage_buffers = 1,
@@ -85,6 +91,8 @@ constexpr DescriptorBankInfo BANK_INFO{
 /// block of Fortune's Weave's title and Kunlun Base; frozen ones exceed it in 6-10% of the blocks.
 constexpr f32 MISMATCH = 0.5f;
 constexpr f32 DARK_FLOOR = 0.01f;
+constexpr f32 MIN_GAIN = 1.0f / 16.0f;
+constexpr f32 MAX_GAIN = 16.0f;
 
 } // Anonymous namespace
 
@@ -92,8 +100,8 @@ DlssNetworkProbe::DlssNetworkProbe(const Device& device_, Scheduler& scheduler_,
                                    DescriptorPool& descriptor_pool,
                                    ComputePassDescriptorQueue& descriptor_queue_,
                                    MemoryAllocator& memory_allocator)
-    : ComputePass(device_, scheduler_, descriptor_pool, BINDINGS, TEMPLATES, BANK_INFO, {},
-                  DLSS_NETWORK_PROBE_COMP_SPV),
+    : ComputePass(device_, scheduler_, descriptor_pool, BINDINGS, TEMPLATES, BANK_INFO,
+                  PUSH_CONSTANT_RANGE, DLSS_NETWORK_PROBE_COMP_SPV),
       scheduler{scheduler_}, descriptor_queue{descriptor_queue_} {
     sampler = device.GetLogical().CreateSampler(VkSamplerCreateInfo{
         .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
@@ -132,7 +140,8 @@ DlssNetworkProbe::DlssNetworkProbe(const Device& device_, Scheduler& scheduler_,
 DlssNetworkProbe::~DlssNetworkProbe() = default;
 
 std::optional<VideoCore::GameDlssProbe> DlssNetworkProbe::Probe(VkImageView input,
-                                                                VkImageView output) {
+                                                                VkImageView output,
+                                                                std::array<u32, 2> input_region) {
     std::optional<VideoCore::GameDlssProbe> result;
     if (ticks[oldest] != 0 && scheduler.IsFree(ticks[oldest])) {
         result = Read(oldest);
@@ -148,7 +157,7 @@ std::optional<VideoCore::GameDlssProbe> DlssNetworkProbe::Probe(VkImageView inpu
     descriptor_queue.AddSampledImage(output, *sampler);
     descriptor_queue.AddBuffer(*results, SLOT_SIZE * next, SLOT_SIZE);
     const void* const descriptor_data{descriptor_queue.UpdateData()};
-    scheduler.Record([this, descriptor_data](vk::CommandBuffer cmdbuf) {
+    scheduler.Record([this, descriptor_data, input_region](vk::CommandBuffer cmdbuf) {
         // The network's last pass and the game's draws wrote the images.
         const VkMemoryBarrier read_images{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
@@ -163,6 +172,8 @@ std::optional<VideoCore::GameDlssProbe> DlssNetworkProbe::Probe(VkImageView inpu
         device.GetLogical().UpdateDescriptorSet(set, *descriptor_template, descriptor_data);
         cmdbuf.BindPipeline(VK_PIPELINE_BIND_POINT_COMPUTE, *pipeline);
         cmdbuf.BindDescriptorSets(VK_PIPELINE_BIND_POINT_COMPUTE, *layout, 0, set, {});
+        cmdbuf.PushConstants(*layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(input_region),
+                             input_region.data());
         cmdbuf.Dispatch(GRID_WIDTH, GRID_HEIGHT, 1);
         const VkMemoryBarrier read_results{
             .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
@@ -183,9 +194,27 @@ VideoCore::GameDlssProbe DlssNetworkProbe::Read(u32 slot) const {
     std::array<f32, GRID_WIDTH * GRID_HEIGHT * 4> blocks;
     std::memcpy(blocks.data(), results.Mapped().data() + SLOT_SIZE * slot, sizeof(blocks));
     VideoCore::GameDlssProbe probe{.blocks = GRID_WIDTH * GRID_HEIGHT};
+    // Duskbloods' native network uses a different exposure from its input. Normalize the output
+    // by the frame-wide gain before comparing blocks; reject extreme gains as invalid exposure.
+    f64 input_total = 0.0;
+    f64 output_total = 0.0;
     for (u32 block = 0; block < GRID_WIDTH * GRID_HEIGHT; ++block) {
         const f32 input = blocks[block * 4];
         const f32 output = blocks[block * 4 + 1];
+        if (std::isfinite(input) && std::isfinite(output)) {
+            input_total += std::max(input, 0.0f);
+            output_total += std::max(output, 0.0f);
+        }
+    }
+    if (input_total > f64{DARK_FLOOR} && output_total > 0.0) {
+        const f32 gain = static_cast<f32>(output_total / input_total);
+        if (gain >= MIN_GAIN && gain <= MAX_GAIN) {
+            probe.gain = gain;
+        }
+    }
+    for (u32 block = 0; block < GRID_WIDTH * GRID_HEIGHT; ++block) {
+        const f32 input = blocks[block * 4];
+        const f32 output = blocks[block * 4 + 1] / probe.gain;
         probe.invalid_samples += static_cast<u32>(blocks[block * 4 + 2]);
         const f32 difference = std::abs(output - input) / (std::max(input, 0.0f) + DARK_FLOOR);
         if (!std::isfinite(difference) || difference > MISMATCH) {

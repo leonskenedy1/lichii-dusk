@@ -990,6 +990,9 @@ struct Values {
     Setting<std::string> network_interface{linkage, std::string(), "network_interface",
                                            Category::Network};
     SwitchableSetting<bool> airplane_mode{linkage, true, "airplane_mode", Category::Network};
+    // Friend codes imported into a private-server profile on first use. Never logged.
+    Setting<std::string> online_friends{linkage, std::string(), "online_friends",
+                                        Category::Network};
 
     // WebService
     Setting<std::string> web_api_url{linkage, "api.ynet-fun.xyz", "web_api_url",

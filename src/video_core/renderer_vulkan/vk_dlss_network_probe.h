@@ -30,7 +30,8 @@ public:
     /// the result of the oldest earlier check the GPU has finished, if any. Skips recording while
     /// every result slot is still in flight.
     [[nodiscard]] std::optional<VideoCore::GameDlssProbe> Probe(VkImageView input,
-                                                                VkImageView output);
+                                                                VkImageView output,
+                                                                std::array<u32, 2> input_region);
 
     static constexpr u32 GRID_WIDTH = 32;
     static constexpr u32 GRID_HEIGHT = 18;

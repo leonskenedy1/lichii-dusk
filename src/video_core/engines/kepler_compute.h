@@ -295,6 +295,8 @@ private:
     void CaptureFireEmblemJitter();
     bool FinishDlssEvaluation();
     void CheckDlssNetwork();
+    /// Whether the network failed its checks for the rest of the session: its passes are skipped.
+    [[nodiscard]] bool DlssNetworkDroppedForGood() const;
     [[nodiscard]] VideoCore::GameDlssReason GameDlssBlocker() const;
     void UpdateGameDlssStatus(bool complete, VideoCore::GameDlssReason blocker);
 
@@ -315,6 +317,7 @@ private:
         u32 good_checks{};
         u32 bad_checks{};
         VideoCore::GameDlssReason failure{};
+        u32 drops{};
         /// Programs of evaluations that reached their output pass; they are skipped only after
         /// the network fails its health checks.
         std::unordered_set<u64> programs;

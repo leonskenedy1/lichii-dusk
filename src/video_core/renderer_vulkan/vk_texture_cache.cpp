@@ -1762,13 +1762,14 @@ bool TextureCacheRuntime::UsesNvidiaDlss() const {
 }
 
 std::optional<VideoCore::GameDlssProbe> TextureCacheRuntime::ProbeGameDlssOutput(
-    ImageView& input, ImageView& output) {
+    ImageView& input, ImageView& output, std::optional<std::array<u32, 2>> input_region) {
     if (!dlss_network_probe) {
         dlss_network_probe = std::make_unique<DlssNetworkProbe>(
             device, scheduler, descriptor_pool, compute_pass_descriptor_queue, memory_allocator);
     }
     return dlss_network_probe->Probe(input.Handle(Shader::TextureType::Color2D),
-                                     output.Handle(Shader::TextureType::Color2D));
+                                     output.Handle(Shader::TextureType::Color2D),
+                                     input_region.value_or(std::array<u32, 2>{}));
 }
 
 bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageView& input_color,
@@ -4554,7 +4555,12 @@ Sampler::Sampler(TextureCacheRuntime& runtime, const Tegra::Texture::TSCEntry& t
 
     f32 min_lod = 0.0f;
     f32 max_lod = 0.25f;
-    if (tsc.mipmap_filter != TextureMipmapFilter::None) {
+    // Duskbloods' bloom reads mip level 1 explicitly through a mipmap-none sampler. Vulkan's
+    // fixed 0..0.25 clamp returned level 0 instead of the level the console samples.
+    constexpr u64 DuskbloodsNetworkTestProgramId = 0x0400D1D02399A000ULL;
+    const bool mip_none_lods = tsc.mipmap_filter == TextureMipmapFilter::None &&
+                               Settings::GetCurrentProgramID() == DuskbloodsNetworkTestProgramId;
+    if (tsc.mipmap_filter != TextureMipmapFilter::None || mip_none_lods) {
         min_lod = tsc.MinLod();
         max_lod = tsc.MaxLod();
         // EDEN_NX2_FORCE_LOD0: sample only the top mip level (debug aid for mip layout problems).

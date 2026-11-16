@@ -723,6 +723,7 @@ PollEvents TranslatePollRevents(short revents) {
 struct OnlineRedirect {
     std::vector<std::string> hosts;
     std::optional<SockAddrIn> server;
+    std::string server_text;
     bool loopback_only{};
 
     static const OnlineRedirect& Get() {
@@ -746,6 +747,7 @@ struct OnlineRedirect {
                                             {static_cast<u8>(a), static_cast<u8>(b),
                                              static_cast<u8>(c), static_cast<u8>(d)},
                                             static_cast<u16>(port)};
+                    out.server_text = text;
                 }
             }
             const char* loopback = std::getenv("EDEN_NX2_LOOPBACK_ONLY");
@@ -840,6 +842,10 @@ u32 IPv4AddressToInteger(IPv4Address ip_addr) {
 
 bool IsOnlineRedirectHost(const std::string& host) {
     return OnlineRedirect::Get().Matches(host);
+}
+std::string GetOnlineRedirectServer() {
+    const auto& redirect = OnlineRedirect::Get();
+    return redirect.server ? redirect.server_text : std::string{};
 }
 
 std::variant<std::vector<AddrInfo>, GetAddrInfoError> GetAddressInfo(

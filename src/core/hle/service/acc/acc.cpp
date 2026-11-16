@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstring>
 
 #include "common/common_types.h"
 #include "common/fs/file.h"
@@ -27,9 +28,45 @@
 #include "core/hle/service/cmif_serialization.h"
 #include "core/hle/service/glue/glue_manager.h"
 #include "core/hle/service/server_manager.h"
+#include "core/hle/service/sockets/online_profile.h"
+#include "core/internal_network/network.h"
 #include "core/loader/loader.h"
 
 namespace Service::Account {
+
+// While the launcher redirects the game to a private server, answer with this emulator's
+// server-specific identity token. Otherwise leave the existing account-token path unchanged.
+static bool ReplyServerIdToken(Core::System& system, HLERequestContext& ctx) {
+    if (Network::GetOnlineRedirectServer().empty()) {
+        return false;
+    }
+    const auto& id = system.GetApplicationProcessBuildID();
+    size_t length = id.size();
+    while (length > 0 && id[length - 1] == 0) {
+        --length;
+    }
+    std::string build;
+    for (size_t i = 0; i < length; ++i) {
+        build += fmt::format("{:02x}", id[i]);
+    }
+    const std::string token = Service::Sockets::OnlineProfile::IdentityToken(build);
+    const size_t capacity = ctx.GetWriteBufferSize();
+    if (token.size() >= capacity) {
+        LOG_ERROR(Service_ACC, "Server id token ({} bytes) does not fit the {}-byte buffer",
+                  token.size(), capacity);
+    }
+    const std::string_view safe_token = token.size() < capacity ? std::string_view{token}
+                                                                 : std::string_view{};
+    std::vector<u8> out(capacity, 0);
+    if (!safe_token.empty()) {
+        std::memcpy(out.data(), safe_token.data(), safe_token.size());
+    }
+    ctx.WriteBuffer(out);
+    IPC::ResponseBuilder rb{ctx, 3};
+    rb.Push(ResultSuccess);
+    rb.Push(static_cast<u32>(safe_token.size()));
+    return true;
+}
 
 // Thumbnails are hard coded to be at least this size
 constexpr std::size_t THUMBNAIL_SIZE = 0x24000;
@@ -502,6 +539,9 @@ protected:
     }
 
     void LoadIdTokenCache(HLERequestContext& ctx) {
+        if (ReplyServerIdToken(system, ctx)) {
+            return;
+        }
         LOG_WARNING(Service_ACC, "(STUBBED) called");
 
         std::vector<u8> token_data(0x100);
@@ -661,6 +701,9 @@ public:
     ~EnsureTokenIdCacheAsyncInterface() = default;
 
     void LoadIdTokenCache(HLERequestContext& ctx) {
+        if (ReplyServerIdToken(system, ctx)) {
+            return;
+        }
         LOG_WARNING(Service_ACC, "(STUBBED) called");
 
         IPC::ResponseBuilder rb{ctx, 3};
@@ -735,6 +778,9 @@ private:
     }
 
     void LoadIdTokenCache(HLERequestContext& ctx) {
+        if (ReplyServerIdToken(system, ctx)) {
+            return;
+        }
         LOG_WARNING(Service_ACC, "(STUBBED) called");
 
         std::vector<u8> token_data(0x100);

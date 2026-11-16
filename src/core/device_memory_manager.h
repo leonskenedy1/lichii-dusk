@@ -34,6 +34,10 @@ namespace Memory {
 class Memory;
 }
 
+/// Bumped when pages become tracked again: a CPU write whose bytes are stored after that
+/// transition must mark the pages dirty again, or a cache may have captured the old contents.
+inline std::atomic<u64> g_pages_tracked_generation{};
+
 template <typename DTraits>
 struct DeviceMemoryManagerAllocator;
 

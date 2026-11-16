@@ -36,6 +36,13 @@ struct Passes {
     // The game renders a varying region of a target the size of the output, and the network's
     // constants give that region.
     bool render_region = false;
+    // Optional second prepass for games whose network uses more than one captured entry point.
+    // Kept empty in this branch; the helper is required by Duskbloods' DLSS health-check port.
+    u64 alternate_prepass{};
+
+    [[nodiscard]] constexpr bool IsPrepass(u64 key) const {
+        return key == prepass || (alternate_prepass != 0 && key == alternate_prepass);
+    }
 };
 
 constexpr std::optional<Passes> CapturedPasses(u64 program_id) {
