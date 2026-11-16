@@ -32,6 +32,8 @@ public:
         VkImageView motion_vectors; ///< Motion to the previous frame at the render size.
         VkExtent2D render_size;
         VkExtent2D upscale_size;
+        /// Largest expected render extent; resources/history remain allocated across dynamic changes.
+        VkExtent2D max_render_size;
         /// This frame's sample offset in render pixels: input texel k sampled k + 0.5 - jitter.
         std::array<f32, 2> jitter;
         /// Turns a motion vector into render pixels (the render size for UV offsets).

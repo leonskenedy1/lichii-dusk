@@ -1776,7 +1776,8 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
                                           ImageView& motion_vectors, ImageView& depth,
                                           std::array<u32, 2> render_size,
                                           std::array<f32, 2> jitter,
-                                          std::array<f32, 2> motion_scale) {
+                                          std::array<f32, 2> motion_scale,
+                                          std::array<u32, 2> max_render_size) {
     if (!WantsTemporalUpscaleDepth()) {
         return false;
     }
@@ -1834,6 +1835,7 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
             .motion_vectors = motion_vectors.Handle(Shader::TextureType::Color2D),
             .render_size = {render_size[0], render_size[1]},
             .upscale_size = extent,
+            .max_render_size = {max_render_size[0], max_render_size[1]},
             .jitter = jitter,
             .motion_vector_scale = {motion_scale[0] * static_cast<f32>(render_size[0]),
                                     motion_scale[1] * static_cast<f32>(render_size[1])},
@@ -2027,12 +2029,18 @@ bool TextureCacheRuntime::TemporalUpscale(Framebuffer* dst_framebuffer, ImageVie
                         !same_size(motion_vectors))) {
         return false;
     }
+    const auto depth_format_ok = [](PixelFormat format) {
+        return format == PixelFormat::D32_FLOAT || format == PixelFormat::D24_UNORM_S8_UINT ||
+               format == PixelFormat::X8_D24_UNORM || format == PixelFormat::D32_FLOAT_S8_UINT;
+    };
     if (use_history && depth && (!plain(*depth) || !fits(*depth, render_size) ||
-                                depth->format != PixelFormat::D32_FLOAT || !same_size(*depth))) {
+                                !depth_format_ok(depth->format) || !same_size(*depth))) {
         return false;
     }
+    const std::array<u32, 2> max_render_size =
+        whole_input ? render_size : host_extent(input_color).value_or(render_size);
     if (use_history && depth && UpscaleWithFsr3(dst_framebuffer, input_color, motion_vectors, *depth, render_size,
-                                 jitter, motion_scale)) {
+                                 jitter, motion_scale, max_render_size)) {
         return true;
     }
     const VkFormat format =

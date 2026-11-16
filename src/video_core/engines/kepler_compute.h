@@ -326,6 +326,9 @@ private:
         std::unordered_set<u64> pending;
         u32 dispatches{};
         u32 evaluations{};
+        /// The replacement drew this evaluation's output; only then may Duskbloods skip the
+        /// original network's other compute passes in the next evaluation.
+        bool replacement_drew{};
         /// What the Graphics tab was last told.
         VideoCore::GameDlssStatus status{};
     } dlss_chain;

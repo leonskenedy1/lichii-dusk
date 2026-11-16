@@ -226,9 +226,24 @@ public:
         const Tegra::Engines::Fermi2D::Surface& motion_vectors,
         const Tegra::Texture::TICEntry* depth, std::array<f32, 2> jitter,
         std::array<f32, 2> motion_scale, bool use_history = true,
-        std::optional<std::array<u32, 2>> render_region = std::nullopt) {
+        std::optional<std::array<u32, 2>> render_region = std::nullopt,
+        bool depth_from_draws = false) {
         return false;
     }
+
+    /// The Duskbloods velocity target and the depth target bound with its draws.
+    struct DuskDrawTargets {
+        Tegra::Engines::Fermi2D::Surface velocity{};
+        GPUVAddr depth{};
+        u32 depth_width{};
+        u32 depth_height{};
+        u32 depth_format{};
+    };
+
+    [[nodiscard]] virtual std::optional<DuskDrawTargets> TakeDuskDrawTargets() {
+        return std::nullopt;
+    }
+    virtual void DropDuskDrawTargets() {}
 
     /// Whether a game's own DLSS network can run here: its matrix multiplies are emulated with
     /// 32-wide shuffles, and its output must be checkable (ProbeGameDlssOutput).
