@@ -1627,6 +1627,33 @@ void RasterizerVulkan::Clear(u32 layer_count) {
         return;
     }
 
+    boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32> zeroed_memory;
+    SCOPE_EXIT {
+        if (zeroed_memory.empty()) {
+            return;
+        }
+        boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32> cleared;
+        {
+            std::scoped_lock buffer_lock{buffer_cache.mutex};
+            // Piece by piece: DMAClear clears one device-contiguous range.
+            for (const auto& [address, size] : zeroed_memory) {
+                const u64 words = size / sizeof(u32);
+                if (buffer_cache.DMAClear(address, words, 0)) {
+                    cleared.emplace_back(address, words * sizeof(u32));
+                }
+            }
+        }
+        // DMAClear stops tracking the range as GPU-modified and clears the buffer object. Also
+        // zero guest memory, or later CPU reads/uploads may resurrect the old bytes.
+        static constexpr std::array<u8, 0x10000> zeros{};
+        for (const auto& [address, size] : cleared) {
+            for (std::size_t offset = 0; offset < size; offset += zeros.size()) {
+                gpu_memory->WriteBlockUnsafe(address + offset, zeros.data(),
+                                             (std::min)(zeros.size(), size - offset));
+            }
+        }
+    };
+    // Declared before this lock so SCOPE_EXIT runs after the texture cache lock is released.
     std::scoped_lock lock{texture_cache.mutex};
     texture_cache.UpdateRenderTargets(true);
     const Framebuffer* const framebuffer = texture_cache.GetFramebuffer();
@@ -1860,21 +1887,16 @@ void RasterizerVulkan::Clear(u32 layer_count) {
                          .y = clear_rect.rect.offset.y + s32(clear_rect.rect.extent.height)}};
             blit_image.ClearColor(framebuffer, color_mask, regs.clear_color, dst_region);
         }
-        // A full zero clear is also a memset of the target's memory. Storage buffers aliasing it
-        // live in the buffer cache and never see the image clear. Duskbloods zeroes its upscaler
-        // scratch arena (1536x1408 RGBA16F at 0x819aaa0000) this way and relies on it for the
-        // tensors' padding rows; stale rows kept NaN alive and whitened the bottom of the image.
-        static constexpr std::array<f32, 4> zero_color{};
-        if (color_full_channels && !is_signed && clear_covers_render_area &&
-            clear_layers.covers_all_layers &&
-            std::memcmp(regs.clear_color.data(), zero_color.data(), sizeof(zero_color)) == 0) {
-            const auto [image, view_base] = texture_cache.ColorTargetImage(color_attachment);
-            if (image != nullptr && image->info.resources.levels == 1 &&
-                image->info.resources.layers == 1 && image->info.size.depth == 1 &&
-                render_area.width >= ((image->info.size.width * up_scale) >> down_shift) &&
-                render_area.height >= ((image->info.size.height * up_scale) >> down_shift)) {
-                std::scoped_lock buffer_lock{buffer_cache.mutex};
-                buffer_cache.DMAClear(image->gpu_addr, image->guest_size_bytes / sizeof(u32), 0);
+        // The image clear is also a memset of the guest target when every byte of a whole colour
+        // target becomes zero. Storage buffers over that memory otherwise retain stale padding
+        // rows (visible as NaNs/white bands in Duskbloods). Defer alias updates until after the
+        // texture cache lock is released.
+        static constexpr VkClearColorValue zero_color{};
+        if (color_full_channels && clear_covers_render_area && clear_layers.covers_all_layers &&
+            std::memcmp(&clear_value.color, &zero_color, sizeof(zero_color)) == 0) {
+            if (const auto target = texture_cache.CoveredColorTarget(
+                    color_attachment, render_area.width, render_area.height)) {
+                zeroed_memory = gpu_memory->GetSubmappedRange(target->first, target->second);
             }
         }
     }

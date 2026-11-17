@@ -118,15 +118,18 @@ public:
 
     [[nodiscard]] virtual u32 LocalMemorySize() const = 0;
 
-    /// Ampere code keeps its stack at the top of the 16 MiB local window (c[0][0x28] is just below
-    /// 16 MiB) and grows it down. Native programs get this many bytes at the end of the local array
-    /// for that region; offsets in the window's upper half are folded onto it.
-    static constexpr u32 NATIVE_LOCAL_STACK_RESERVE = 0x800;
-    static constexpr u32 LOCAL_WINDOW_SIZE = 0x1000000;
+    /// Ampere programs keep their call stack at the top of the 16 MiB local memory window and
+    /// grow it down. A native program's local array holds a spare word, a fixed stack region, then
+    /// its declared local memory. The first two regions have fixed addresses across merged stages.
+    static constexpr u32 LOCAL_WINDOW_BYTES = 0x1000000;
+    static constexpr u32 NATIVE_STACK_BYTES = 0x800;
+    static constexpr u32 NATIVE_STACK_BASE = 4;
+    static constexpr u32 NATIVE_DECLARED_BASE = NATIVE_STACK_BASE + NATIVE_STACK_BYTES;
 
-    /// Size of the local array the program needs, including the native stack region.
+    /// Bytes of the program's local array, including the spare word and stack when native.
     [[nodiscard]] u32 LocalArraySize() const {
-        return LocalMemorySize() + (IsNativeProgram() ? NATIVE_LOCAL_STACK_RESERVE : 0U);
+        const u32 declared = (LocalMemorySize() + 3U) & ~3U;
+        return IsNativeProgram() ? NATIVE_DECLARED_BASE + declared : LocalMemorySize();
     }
 
     [[nodiscard]] virtual u32 SharedMemorySize() const = 0;

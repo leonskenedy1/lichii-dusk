@@ -326,6 +326,10 @@ private:
         std::unordered_set<u64> pending;
         u32 dispatches{};
         u32 evaluations{};
+        /// Whether the replacement upscale drew the last evaluation's output. While it does, and
+        /// this evaluation's jitter was captured, intermediate network passes only feed the
+        /// output pass the replacement will draw over.
+        bool replacement_drew{};
         /// What the Graphics tab was last told.
         VideoCore::GameDlssStatus status{};
     } dlss_chain;
