@@ -45,17 +45,8 @@ public:
             entries.clear();
         }
         const size_t as_id = memory.GetID();
-        // A range inside a span known to map linearly is one segment; storage bindings move
-        // through large buffers at shifting offsets, and each new address would walk the page table.
-        if (const auto span = FindSpan(as_id, gpu_addr, size)) {
-            span_result.clear();
-            span_result.push_back(VirtualSegment{
-                .gpu_addr = gpu_addr,
-                .device_addr = *span,
-                .size = size,
-            });
-            return &span_result;
-        }
+        // Prefer the existing exact-address cache: this hash lookup is cheaper than the span
+        // tree lookup and serves repeated bindings without needing a second index search.
         const u64 key = MakeKey(as_id, gpu_addr);
         const auto it = entries.find(key);
         if (it != entries.end() && it->second.as_id == as_id && it->second.gpu_addr == gpu_addr) {
@@ -66,6 +57,17 @@ public:
             if (cached.size == size || (cached.segments.size() == 1 && size < cached.size)) {
                 return &cached.segments;
             }
+        }
+        // Only pay for the ordered span lookup when the existing address cache cannot answer.
+        // This retains PR #1483's fast path for new, shifted offsets in a known linear span.
+        if (const auto span = FindSpan(as_id, gpu_addr, size)) {
+            span_result.clear();
+            span_result.push_back(VirtualSegment{
+                .gpu_addr = gpu_addr,
+                .device_addr = *span,
+                .size = size,
+            });
+            return &span_result;
         }
         Entry entry{};
         entry.as_id = as_id;
