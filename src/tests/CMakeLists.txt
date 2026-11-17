@@ -48,6 +48,7 @@ add_executable(tests
     video_core/ampere_logged_textures.cpp
     video_core/native_texture_header_index.cpp
     video_core/texture_handles.cpp
+    video_core/phi_identity_operand.cpp
     video_core/ampere_selevet_modes.cpp
     video_core/ampere_selevet_spills.cpp
     video_core/blit_dither.cpp
@@ -88,6 +89,7 @@ add_executable(tests
     video_core/x8d24_conversion.cpp
     video_core/ampere_ported_half_compare.cpp
     video_core/ampere_geometry_capture.cpp
+    video_core/ampere_duskbloods_forms.cpp
     video_core/ampere_geometry_exit.cpp
     video_core/ampere_geometry_lowering.cpp
     video_core/ampere_ported_conversions.cpp

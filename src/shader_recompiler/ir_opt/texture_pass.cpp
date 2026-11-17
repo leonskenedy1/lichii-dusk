@@ -866,6 +866,20 @@ std::optional<ConstBufferAddr> TryGetConstBuffer(const IR::Inst* inst, Environme
         return lhs;
         break;
     }
+    case IR::Opcode::CompositeExtractU32x2: {
+        // A word extracted from LDC.64/ULDC.64 retains its own cbuffer offset.
+        const IR::Value vector{inst->Arg(0)};
+        const IR::Value element{inst->Arg(1)};
+        if (vector.IsImmediate() || !element.IsImmediate() ||
+            vector.InstRecursive()->GetOpcode() != IR::Opcode::GetCbufU32x2) {
+            return std::nullopt;
+        }
+        std::optional result{TryGetConstBuffer(vector.InstRecursive(), env, host_info, block)};
+        if (result) {
+            result->offset += element.U32() * static_cast<u32>(sizeof(u32));
+        }
+        return result;
+    }
     case IR::Opcode::GetCbufU32x2:
     case IR::Opcode::GetCbufU32:
         break;

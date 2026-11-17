@@ -78,20 +78,33 @@ void WriteStorageByCasLoop(EmitContext& ctx, const IR::Value& binding, const IR:
 }
 } // Anonymous namespace
 
-void EmitLoadGlobalU8(EmitContext&) {
-    throw NotImplementedException("SPIR-V Instruction");
+namespace {
+Id LoadGlobalSubword(EmitContext& ctx, Id address, u32 bits, bool is_signed) {
+    if (!ctx.profile.support_int64) {
+        LOG_WARNING(Shader_SPIRV, "Int64 not supported, ignoring memory operation");
+        return ctx.u32_zero_value;
+    }
+    const Id aligned{ctx.OpBitwiseAnd(ctx.U64, address, ctx.Constant(ctx.U64, ~u64{3}))};
+    const Id word{ctx.OpFunctionCall(ctx.U32[1], ctx.load_global_func_u32, aligned)};
+    const Id byte{ctx.OpUConvert(
+        ctx.U32[1], ctx.OpBitwiseAnd(ctx.U64, address, ctx.Constant(ctx.U64, u64{3})))};
+    const Id shift{ctx.OpShiftLeftLogical(ctx.U32[1], byte, ctx.Const(3U))};
+    return is_signed ? ctx.OpBitFieldSExtract(ctx.U32[1], word, shift, ctx.Const(bits))
+                     : ctx.OpBitFieldUExtract(ctx.U32[1], word, shift, ctx.Const(bits));
 }
+} // Anonymous namespace
 
-void EmitLoadGlobalS8(EmitContext&) {
-    throw NotImplementedException("SPIR-V Instruction");
+Id EmitLoadGlobalU8(EmitContext& ctx, Id address) {
+    return LoadGlobalSubword(ctx, address, 8, false);
 }
-
-void EmitLoadGlobalU16(EmitContext&) {
-    throw NotImplementedException("SPIR-V Instruction");
+Id EmitLoadGlobalS8(EmitContext& ctx, Id address) {
+    return LoadGlobalSubword(ctx, address, 8, true);
 }
-
-void EmitLoadGlobalS16(EmitContext&) {
-    throw NotImplementedException("SPIR-V Instruction");
+Id EmitLoadGlobalU16(EmitContext& ctx, Id address) {
+    return LoadGlobalSubword(ctx, address, 16, false);
+}
+Id EmitLoadGlobalS16(EmitContext& ctx, Id address) {
+    return LoadGlobalSubword(ctx, address, 16, true);
 }
 
 Id EmitLoadGlobal32(EmitContext& ctx, Id address) {
