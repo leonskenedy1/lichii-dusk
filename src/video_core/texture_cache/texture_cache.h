@@ -1265,7 +1265,8 @@ bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
 
 template <class P>
 std::optional<VideoCore::GameDlssProbe> TextureCache<P>::ProbeGameDlssOutput(
-    const Tegra::Engines::Fermi2D::Surface& dst, const Tegra::Engines::Fermi2D::Surface& src) {
+    const Tegra::Engines::Fermi2D::Surface& dst, const Tegra::Engines::Fermi2D::Surface& src,
+    std::optional<std::array<u32, 2>> src_region) {
     if constexpr (FRAMEBUFFER_BLITS) {
         return std::nullopt;
     } else {
@@ -1311,8 +1312,16 @@ std::optional<VideoCore::GameDlssProbe> TextureCache<P>::ProbeGameDlssOutput(
         if (!src_view || !dst_view) {
             return std::nullopt;
         }
-        return runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
-                                           slot_image_views[*dst_view]);
+        if constexpr (requires {
+                          runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
+                                                     slot_image_views[*dst_view], src_region);
+                      }) {
+            return runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
+                                               slot_image_views[*dst_view], src_region);
+        } else {
+            return runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
+                                               slot_image_views[*dst_view]);
+        }
     }
 }
 
@@ -1323,7 +1332,8 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
                                       const Tegra::Texture::TICEntry* depth,
                                       std::array<f32, 2> jitter, std::array<f32, 2> motion_scale,
                                       bool use_history,
-                                      std::optional<std::array<u32, 2>> render_region) {
+                                      std::optional<std::array<u32, 2>> render_region,
+                                      const std::pair<ImageInfo, GPUVAddr>* depth_target) {
     if constexpr (FRAMEBUFFER_BLITS) {
         return false;
     } else {
@@ -1350,10 +1360,13 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         const ImageId motion_id =
             FindOrInsertImage(motion_info, motion_surface.Address(), RelaxedOptions{});
         // The depth only feeds NVIDIA DLSS and FSR 3.1 (looked up only when they can run); without
-        // it the stand-in runs.
+        // it the stand-in runs. A tracked Duskbloods depth target can be used instead of a TIC.
         ImageId depth_id{};
-        if (use_history && depth && motion_id && runtime.WantsTemporalUpscaleDepth()) {
-            depth_id = FindOrInsertImage(ImageInfo(*depth), depth->Address(), RelaxedOptions{});
+        const GPUVAddr depth_address =
+            depth_target ? depth_target->second : depth ? depth->Address() : GPUVAddr{};
+        if (use_history && depth_address && motion_id && runtime.WantsTemporalUpscaleDepth()) {
+            depth_id = FindOrInsertImage(depth_target ? depth_target->first : ImageInfo(*depth),
+                                         depth_address, RelaxedOptions{});
             if (!depth_id) {
                 return false;
             }
@@ -1368,8 +1381,13 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         PrepareImage(dst_id, true, false);
         if (depth_id) {
             PrepareImage(depth_id, false, false);
-            if (slot_images[depth_id].info.num_samples != 1 ||
-                slot_images[depth_id].info.format != PixelFormat::D32_FLOAT) {
+            const PixelFormat depth_format = slot_images[depth_id].info.format;
+            const bool depth_format_ok =
+                depth_format == PixelFormat::D32_FLOAT ||
+                (depth_target && (depth_format == PixelFormat::D24_UNORM_S8_UINT ||
+                                  depth_format == PixelFormat::X8_D24_UNORM ||
+                                  depth_format == PixelFormat::D32_FLOAT_S8_UINT));
+            if (slot_images[depth_id].info.num_samples != 1 || !depth_format_ok) {
                 return false;
             }
         }
@@ -1430,10 +1448,11 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         }
         ImageViewId depth_view{};
         if (depth_id) {
-            if (const std::optional base = slot_images[depth_id].TryFindBase(depth->Address())) {
+            if (const std::optional base = slot_images[depth_id].TryFindBase(depth_address)) {
                 const SubresourceRange range{.base = *base, .extent = {1, 1}};
                 depth_view = FindOrEmplaceImageView(
-                    depth_id, ImageViewInfo(ImageViewType::e2D, PixelFormat::D32_FLOAT, range));
+                    depth_id, ImageViewInfo(ImageViewType::e2D, slot_images[depth_id].info.format,
+                                            range));
             }
             if (!depth_view) {
                 return false;
