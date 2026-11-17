@@ -24,6 +24,7 @@ public:
     bool native{};
     std::vector<u32> scalar_offsets;
     TestEnvironment() { stage = Shader::Stage::Compute; }
+    void SetStage(Shader::Stage stage_) { stage = stage_; }
     bool IsNativeProgram() const override { return native; }
     bool IsCbufStorageBufferPointer(u32 index, u32 offset) override {
         return index == 0 && std::ranges::find(scalar_offsets, offset) == scalar_offsets.end();
@@ -626,4 +627,251 @@ TEST_CASE("NVN fallback descriptors use guest slots rather than compact binding 
     auto reversed = descriptors;
     std::ranges::reverse(reversed);
     CHECK(selected(reversed) == std::vector<u32>{0x400, 0x340});
+}
+
+
+namespace {
+struct LoadedPointerRecords {
+    KernelProgram fixture;
+
+    IR::U32 LoadedLow(IR::IREmitter& ir, IR::U32& high) {
+        fixture.env.native = true;
+        const IR::Value loaded{ir.LoadGlobal64(Address(ir, Word(ir, 0x30), Word(ir, 0x34)))};
+        high = IR::U32{ir.CompositeExtract(loaded, 1)};
+        return IR::U32{ir.CompositeExtract(loaded, 0)};
+    }
+
+    static IR::U32 RecordOffset(IR::IREmitter& ir) {
+        return ir.IAdd(ir.ShiftLeftLogical(ir.LocalInvocationIdX(), ir.Imm32(6)), ir.Imm32(60));
+    }
+
+    std::ptrdiff_t Count(IR::Opcode opcode) const {
+        std::ptrdiff_t total{};
+        for (const IR::Block* const block : fixture.program.blocks) {
+            total += std::ranges::count_if(block->Instructions(), [=](const IR::Inst& inst) {
+                return inst.GetOpcode() == opcode;
+            });
+        }
+        return total;
+    }
+
+    const IR::Inst* Find(IR::Opcode opcode) const {
+        for (const IR::Block* const block : fixture.program.blocks) {
+            for (const IR::Inst& inst : block->Instructions()) {
+                if (inst.GetOpcode() == opcode) {
+                    return &inst;
+                }
+            }
+        }
+        return nullptr;
+    }
+};
+
+struct PointerOrNullRecords {
+    LoadedPointerRecords records;
+    IR::Block body{records.fixture.pool};
+    IR::Block exit{records.fixture.pool};
+
+    void SetBlocks() {
+        records.fixture.program.blocks = {&records.fixture.entry, &body, &exit};
+        records.fixture.program.post_order_blocks = {&exit, &body, &records.fixture.entry};
+        for (u32 index = 0; index < records.fixture.program.blocks.size(); ++index) {
+            records.fixture.program.blocks[index]->SetOrder(index);
+        }
+    }
+
+    void Build(bool matching_high_phi, bool offset_after_merge, bool high_carry_after_merge = false) {
+        records.fixture.env.SetStage(Shader::Stage::Fragment);
+        records.fixture.entry.AddBranch(&body);
+        records.fixture.entry.AddBranch(&exit);
+        body.AddBranch(&exit);
+        SetBlocks();
+        IR::IREmitter entry{records.fixture.entry};
+        IR::U32 high;
+        const IR::U32 low{records.LoadedLow(entry, high)};
+        IR::IREmitter body_ir{body};
+        const IR::U32 address_low{body_ir.IAdd(low, LoadedPointerRecords::RecordOffset(body_ir))};
+        exit.AppendNewInst(IR::Opcode::Phi, {});
+        IR::Inst* const low_or_null{&exit.back()};
+        low_or_null->SetFlags(IR::Type::U32);
+        low_or_null->AddPhiOperand(&body, address_low);
+        low_or_null->AddPhiOperand(&records.fixture.entry, IR::Value{0U});
+        IR::U32 address_high{high};
+        if (matching_high_phi) {
+            exit.AppendNewInst(IR::Opcode::Phi, {});
+            IR::Inst* const high_or_null{&exit.back()};
+            high_or_null->SetFlags(IR::Type::U32);
+            high_or_null->AddPhiOperand(&body, IR::Value{high});
+            high_or_null->AddPhiOperand(&records.fixture.entry, IR::Value{0U});
+            address_high = IR::U32{IR::Value{high_or_null}};
+        }
+        IR::IREmitter exit_ir{exit};
+        IR::U32 final_low{IR::Value{low_or_null}};
+        if (offset_after_merge) {
+            final_low = exit_ir.IAdd(final_low, exit_ir.Imm32(16));
+        }
+        if (high_carry_after_merge) {
+            const IR::U32 carry{exit_ir.Select(exit_ir.GetCarryFromOp(address_low),
+                                              exit_ir.Imm32(1), exit_ir.Imm32(0))};
+            address_high = exit_ir.IAdd(address_high, carry);
+        }
+        exit_ir.SetReg(IR::Reg::R0,
+                       exit_ir.LoadGlobal32(Address(exit_ir, final_low, address_high)));
+        records.fixture.TrackedOffsets();
+    }
+
+    bool ReadsPointerOrNull() const {
+        if (records.Count(IR::Opcode::LoadGlobal32) != 0) {
+            return false;
+        }
+        for (const IR::Block* const block : records.fixture.program.blocks) {
+            for (const IR::Inst& inst : block->Instructions()) {
+                if (inst.GetOpcode() == IR::Opcode::SelectU32 && !inst.Arg(1).IsImmediate() &&
+                    inst.Arg(1).InstRecursive()->GetOpcode() == IR::Opcode::LoadStorage32) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+};
+
+bool ReadsFromLoadedPointer(const LoadedPointerRecords& records, const IR::U32& low) {
+    const IR::Inst* const read{records.Find(IR::Opcode::LoadStorage32)};
+    if (read == nullptr || read->Arg(1).IsImmediate()) {
+        return false;
+    }
+    const IR::Inst* const offset{read->Arg(1).InstRecursive()};
+    if (offset->GetOpcode() != IR::Opcode::ISub32 || offset->Arg(1).IsImmediate()) {
+        return false;
+    }
+    const IR::Inst* const base{offset->Arg(1).InstRecursive()};
+    return base->GetOpcode() == IR::Opcode::BitwiseAnd32 && !base->Arg(0).IsImmediate() &&
+           base->Arg(0).InstRecursive() == low.InstRecursive();
+}
+} // Anonymous namespace
+
+TEST_CASE("Native reads through a single loaded pointer use that pointer's binding",
+          "[shader][storage_buffer]") {
+    LoadedPointerRecords records;
+    IR::IREmitter ir{records.fixture.entry};
+    IR::U32 high;
+    const IR::U32 low{records.LoadedLow(ir, high)};
+    ir.SetReg(IR::Reg::R0,
+              ir.LoadGlobal32(Address(ir, ir.IAdd(low, LoadedPointerRecords::RecordOffset(ir)), high)));
+    records.fixture.TrackedOffsets();
+
+    CHECK(records.Count(IR::Opcode::LoadGlobal32) == 0);
+    CHECK(records.Count(IR::Opcode::LoadStorage32) == 1);
+    CHECK(ReadsFromLoadedPointer(records, low));
+    const auto& descriptors{records.fixture.program.info.storage_buffers_descriptors};
+    CHECK(std::ranges::any_of(descriptors, [](const auto& desc) {
+        return desc.cbuf_offset == 0x30 && desc.indirect_offset == 0;
+    }));
+    CHECK(std::ranges::any_of(descriptors, [](const auto& desc) {
+        return desc.cbuf_offset == 0x30 && desc.indirect_offset == ~0U;
+    }));
+}
+
+TEST_CASE("A loaded pointer with a different high word is not rebased",
+          "[shader][storage_buffer]") {
+    LoadedPointerRecords records;
+    IR::IREmitter ir{records.fixture.entry};
+    IR::U32 high;
+    const IR::U32 low{records.LoadedLow(ir, high)};
+    const IR::Value other{ir.LoadGlobal64(Address(ir, Word(ir, 0x40), Word(ir, 0x44)))};
+    const IR::U32 other_high{ir.CompositeExtract(other, 1)};
+    ir.SetReg(IR::Reg::R0,
+              ir.LoadGlobal32(Address(ir, ir.IAdd(low, LoadedPointerRecords::RecordOffset(ir)),
+                                      other_high)));
+    records.fixture.TrackedOffsets();
+    CHECK_FALSE(ReadsFromLoadedPointer(records, low));
+    CHECK(records.Count(IR::Opcode::LoadGlobal32) == 1);
+}
+
+TEST_CASE("Carries into a loaded pointer high word must come from its low-address additions",
+          "[shader][storage_buffer]") {
+    LoadedPointerRecords valid;
+    {
+        IR::IREmitter ir{valid.fixture.entry};
+        IR::U32 high;
+        const IR::U32 low{valid.LoadedLow(ir, high)};
+        const IR::U32 address_low{ir.IAdd(low, LoadedPointerRecords::RecordOffset(ir))};
+        const IR::U32 carry{ir.Select(ir.GetCarryFromOp(address_low), ir.Imm32(1), ir.Imm32(0))};
+        ir.SetReg(IR::Reg::R0, ir.LoadGlobal32(Address(ir, address_low, ir.IAdd(high, carry))));
+        valid.fixture.TrackedOffsets();
+        CHECK(ReadsFromLoadedPointer(valid, low));
+    }
+    LoadedPointerRecords unrelated;
+    {
+        IR::IREmitter ir{unrelated.fixture.entry};
+        IR::U32 high;
+        const IR::U32 low{unrelated.LoadedLow(ir, high)};
+        const IR::U32 address_low{ir.IAdd(low, LoadedPointerRecords::RecordOffset(ir))};
+        const IR::U32 other{ir.IAdd(Word(ir, 0x50), Word(ir, 0x54))};
+        const IR::U32 carry{ir.Select(ir.GetCarryFromOp(other), ir.Imm32(1), ir.Imm32(0))};
+        ir.SetReg(IR::Reg::R1, other);
+        ir.SetReg(IR::Reg::R0, ir.LoadGlobal32(Address(ir, address_low, ir.IAdd(high, carry))));
+        unrelated.fixture.TrackedOffsets();
+        CHECK_FALSE(ReadsFromLoadedPointer(unrelated, low));
+    }
+}
+
+TEST_CASE("Writes to a pointer holder prevent direct loaded-pointer reads",
+          "[shader][storage_buffer]") {
+    LoadedPointerRecords records;
+    IR::IREmitter ir{records.fixture.entry};
+    IR::U32 high;
+    const IR::U32 low{records.LoadedLow(ir, high)};
+    ir.SetReg(IR::Reg::R0,
+              ir.LoadGlobal32(Address(ir, ir.IAdd(low, LoadedPointerRecords::RecordOffset(ir)), high)));
+    ir.WriteGlobal32(Address(ir, Word(ir, 0x30), Word(ir, 0x34)), ir.Imm32(0));
+    records.fixture.TrackedOffsets();
+    CHECK_FALSE(ReadsFromLoadedPointer(records, low));
+    CHECK(records.Count(IR::Opcode::LoadGlobal32) == 1);
+}
+
+TEST_CASE("Untracked global writes prevent direct loaded-pointer reads",
+          "[shader][storage_buffer]") {
+    LoadedPointerRecords records;
+    IR::IREmitter ir{records.fixture.entry};
+    IR::U32 high;
+    const IR::U32 low{records.LoadedLow(ir, high)};
+    ir.SetReg(IR::Reg::R0,
+              ir.LoadGlobal32(Address(ir, ir.IAdd(low, LoadedPointerRecords::RecordOffset(ir)), high)));
+    ir.WriteGlobal32(Address(ir, ir.LocalInvocationIdX(), ir.Imm32(0)), ir.Imm32(0));
+    records.fixture.TrackedOffsets();
+    CHECK_FALSE(ReadsFromLoadedPointer(records, low));
+    CHECK(records.Count(IR::Opcode::LoadGlobal32) == 1);
+    CHECK(records.fixture.program.info.native_global_bounds);
+}
+
+TEST_CASE("A verified pointer-or-null read uses a CFG path marker rather than comparing pointer bits",
+          "[shader][storage_buffer]") {
+    PointerOrNullRecords read;
+    read.Build(true, false);
+    CHECK(read.ReadsPointerOrNull());
+    const IR::Inst* const select{read.records.Find(IR::Opcode::SelectU32)};
+    REQUIRE(select != nullptr);
+    REQUIRE(select->Arg(1).InstRecursive()->GetOpcode() == IR::Opcode::LoadStorage32);
+    REQUIRE(select->Arg(2).IsImmediate());
+    CHECK(select->Arg(2).U32() == 0);
+    const IR::Inst* const path{select->Arg(0).InstRecursive()};
+    REQUIRE(path->GetOpcode() == IR::Opcode::Phi);
+    CHECK(path->Flags<IR::Type>() == IR::Type::U1);
+}
+
+TEST_CASE("A null-phi optimization requires the complete 64-bit address to be null on its null edge",
+          "[shader][storage_buffer]") {
+    PointerOrNullRecords high_not_null;
+    high_not_null.Build(false, false);
+    CHECK_FALSE(high_not_null.ReadsPointerOrNull());
+    PointerOrNullRecords offset_after;
+    offset_after.Build(true, true);
+    CHECK_FALSE(offset_after.ReadsPointerOrNull());
+    // Even a valid low-address carry becomes unsafe when added after the high null-phi: it
+    // changes the high word on the nominally-null path.
+    PointerOrNullRecords carry_after_high_phi;
+    carry_after_high_phi.Build(true, false, true);
+    CHECK_FALSE(carry_after_high_phi.ReadsPointerOrNull());
 }
