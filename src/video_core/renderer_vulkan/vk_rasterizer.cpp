@@ -75,6 +75,13 @@
 #include "video_core/nx2_debug_control.h"
 #include "video_core/nx2_profile.h"
 
+// Temporary A/B experiment for the Duskbloods zero-clear path. In performance branches,
+// guest-memory mirroring is skipped by default to measure its cost independently of DMAClear.
+// Define this macro as 0 at build time to restore the correctness-preserving write path.
+#ifndef LICHII_EXPERIMENT_SKIP_DUSKBLOODS_CLEAR_GUEST_WRITE
+#define LICHII_EXPERIMENT_SKIP_DUSKBLOODS_CLEAR_GUEST_WRITE 1
+#endif
+
 namespace Vulkan {
 
 using Maxwell = Tegra::Engines::Maxwell3D::Regs;
@@ -1643,6 +1650,13 @@ void RasterizerVulkan::Clear(u32 layer_count) {
                 }
             }
         }
+        // PR #1490's DMAClear is still active above. This experiment isolates the extra guest-RAM
+        // mirror write: skipping it measures the cost of WriteBlockUnsafe without removing the
+        // buffer clear itself. Diagnostic only: stale guest bytes can return on later buffer
+        // recreation, so this mode may reintroduce the old Duskbloods NaN/white-band artifacts.
+#if LICHII_EXPERIMENT_SKIP_DUSKBLOODS_CLEAR_GUEST_WRITE
+        (void)cleared;
+#else
         // DMAClear stops tracking the range as GPU-modified and clears the buffer object. Also
         // zero guest memory, or later CPU reads/uploads may resurrect the old bytes.
         static constexpr std::array<u8, 0x10000> zeros{};
@@ -1652,6 +1666,7 @@ void RasterizerVulkan::Clear(u32 layer_count) {
                                              (std::min)(zeros.size(), size - offset));
             }
         }
+#endif
     };
     // Declared before this lock so SCOPE_EXIT runs after the texture cache lock is released.
     std::scoped_lock lock{texture_cache.mutex};
