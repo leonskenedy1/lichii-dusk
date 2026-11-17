@@ -664,8 +664,8 @@ bool KeplerCompute::ProcessGameDlss(u64 program_id, u64 native_key) {
         return replacement && !recheck_after_dispatch && FinishDlssEvaluation();
     }
     const bool replacement_will_draw =
-        dlss_chain.render_region && replacement && dlss_chain.replacement_drew &&
-        fe_upscale_jitter.Has();
+        dlss_chain.render_region && replacement && !recheck_after_dispatch &&
+        dlss_chain.replacement_drew && fe_upscale_jitter.Has();
     return (DlssNetworkDroppedForGood() || replacement_will_draw) &&
            !passes->IsPrepass(native_key) && dlss_chain.programs.contains(native_key);
 }
@@ -1296,12 +1296,7 @@ bool KeplerCompute::ScaleDlssRenderRegion(GPUVAddr constants,
                                        tracked->depth_width, tracked->depth_height,
                                        tracked->depth_format)
                          : std::string{"none"},
-                     motion ? fmt::format("{:#x} {}x{}", motion->Address(), motion->Width(),
-                                          motion->Height())
-                            : std::string{"none"},
-                     depth ? fmt::format("{:#x} {}x{}", depth->Address(), depth->Width(),
-                                         depth->Height())
-                           : std::string{"none"},
+                     describe(motion), describe(depth),
                      width, height, output->Width(), output->Height(), motion_scale[0],
                      motion_scale[1]);
         }
