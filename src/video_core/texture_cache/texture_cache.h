@@ -1265,7 +1265,8 @@ bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
 
 template <class P>
 std::optional<VideoCore::GameDlssProbe> TextureCache<P>::ProbeGameDlssOutput(
-    const Tegra::Engines::Fermi2D::Surface& dst, const Tegra::Engines::Fermi2D::Surface& src) {
+    const Tegra::Engines::Fermi2D::Surface& dst, const Tegra::Engines::Fermi2D::Surface& src,
+    std::optional<std::array<u32, 2>> src_region) {
     if constexpr (FRAMEBUFFER_BLITS) {
         return std::nullopt;
     } else {
@@ -1311,8 +1312,16 @@ std::optional<VideoCore::GameDlssProbe> TextureCache<P>::ProbeGameDlssOutput(
         if (!src_view || !dst_view) {
             return std::nullopt;
         }
-        return runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
-                                           slot_image_views[*dst_view]);
+        if constexpr (requires {
+                          runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
+                                                     slot_image_views[*dst_view], src_region);
+                      }) {
+            return runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
+                                               slot_image_views[*dst_view], src_region);
+        } else {
+            return runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
+                                               slot_image_views[*dst_view]);
+        }
     }
 }
 
