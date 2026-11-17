@@ -155,21 +155,35 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
         ticks_to_destroy = (std::max)(ticks_to_destroy, min_age);
         num_iterations = aggressive_mode ? 40 : (high_priority_mode ? 20 : 10);
     };
-    const auto Cleanup = [this, &num_iterations, &high_priority_mode, &aggressive_mode,
-                          &evict_old_costly, out_of_memory](ImageId image_id) {
-        if (num_iterations == 0) {
-            return true;
-        }
-        --num_iterations;
-        auto& image = slot_images[image_id];
+    const auto CanEvict = [this, &high_priority_mode, &aggressive_mode,
+                           &evict_old_costly](ImageId image_id, bool* out_must_download = nullptr) {
+        const auto& image = slot_images[image_id];
         if (True(image.flags & ImageFlagBits::IsDecoding)) {
             return false;
         }
-        const bool must_download = IsDownloadable(image) && False(image.flags & ImageFlagBits::BadOverlap);
-        if ((!aggressive_mode && !evict_old_costly && True(image.flags & ImageFlagBits::CostlyLoad)) ||
+        const bool must_download =
+            IsDownloadable(image) && False(image.flags & ImageFlagBits::BadOverlap);
+        if (out_must_download != nullptr) {
+            *out_must_download = must_download;
+        }
+        if ((!aggressive_mode && !evict_old_costly &&
+             True(image.flags & ImageFlagBits::CostlyLoad)) ||
             (!high_priority_mode && must_download)) {
             return false;
         }
+        return true;
+    };
+    const auto Cleanup = [this, &num_iterations, &high_priority_mode, &aggressive_mode, &CanEvict,
+                          out_of_memory](ImageId image_id) {
+        if (num_iterations == 0) {
+            return true;
+        }
+        bool must_download = false;
+        if (!CanEvict(image_id, &must_download)) {
+            return false;
+        }
+        --num_iterations;
+        auto& image = slot_images[image_id];
         if (must_download) {
             auto map = runtime.DownloadStagingBuffer(image.unswizzled_size_bytes);
             const auto copies = FullDownloadCopies(image.info);
@@ -180,6 +194,15 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
         }
         if (True(image.flags & ImageFlagBits::Tracked)) {
             UntrackImage(image, image_id);
+        }
+        if constexpr (requires(const Image& img) { img.MemoryBlock(); }) {
+            const auto block = image.MemoryBlock();
+            if (block.block != 0) {
+                const auto it = block_image_bytes.find(block.block);
+                if (it != block_image_bytes.end()) {
+                    it->second -= (std::min)(it->second, block.size);
+                }
+            }
         }
         ++(True(image.flags & ImageFlagBits::CostlyLoad) ? gc_costly_deletes : gc_deletes);
         UnregisterImage(image_id);
@@ -202,12 +225,19 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
     // used). Among the oldest candidates (8 per image this pass may delete), those in the
     // emptiest blocks go first, so blocks drain and go back to the driver; placement already
     // prefers the fullest blocks (best fit). Images with memory of their own sit in the middle.
-    const auto Collect = [&] {
+    const auto Collect = [&](u64 age_override = 0) {
+        const u64 required_age = age_override != 0 ? age_override : ticks_to_destroy;
+        if (num_iterations == 0 || frame_tick < required_age) {
+            return;
+        }
+        const u64 last_tick = frame_tick - required_age;
         if constexpr (requires(const Image& image) { image.MemoryBlock(); }) {
             std::vector<ImageId> candidates;
             const size_t limit = num_iterations * 8;
-            lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, [&](ImageId image_id) {
-                candidates.push_back(image_id);
+            lru_cache.ForEachItemBelow(last_tick, [&](ImageId image_id) {
+                if (CanEvict(image_id)) {
+                    candidates.push_back(image_id);
+                }
                 return candidates.size() >= limit;
             });
             if (candidates.empty()) {
@@ -244,7 +274,7 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
                 }
             }
         } else {
-            lru_cache.ForEachItemBelow(frame_tick - ticks_to_destroy, Cleanup);
+            lru_cache.ForEachItemBelow(last_tick, Cleanup);
         }
     };
     Configure(false);
@@ -254,7 +284,7 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
     }();
     if (high_priority_mode && old_age != 0 && frame_tick > old_age) {
         evict_old_costly = true;
-        lru_cache.ForEachItemBelow(frame_tick - old_age, Cleanup);
+        Collect(old_age);
         evict_old_costly = false;
     }
     Collect();
@@ -1117,84 +1147,6 @@ void TextureCache<P>::UnmapGPUMemory(size_t as_id, GPUVAddr gpu_addr, size_t siz
     }
 }
 
-// A 2D-engine copy between two 3D surfaces names one depth slice by its address inside the
-// volume (The Duskbloods network test copies its 16x16x16 grading table slice by slice). Copy
-// that slice of the cached 3D images when both exist with the surface's size and format;
-// otherwise the generic path treats each slice as its own 2D image.
-template <class P>
-bool TextureCache<P>::CopyVolumeSlice(const Tegra::Engines::Fermi2D::Surface& dst,
-                                      const Tegra::Engines::Fermi2D::Surface& src,
-                                      const Tegra::Engines::Fermi2D::Config& copy) {
-    using Tegra::Engines::Fermi2D;
-    const auto is_volume = [](const Fermi2D::Surface& surface) {
-        return surface.depth > 1 && surface.linear == Fermi2D::MemoryLayout::BlockLinear &&
-               surface.layer == 0;
-    };
-    const bool whole_slice = copy.src_x0 == 0 && copy.src_y0 == 0 && copy.dst_x0 == 0 &&
-                             copy.dst_y0 == 0 && copy.src_x1 == static_cast<s32>(src.width) &&
-                             copy.src_y1 == static_cast<s32>(src.height) &&
-                             copy.dst_x1 == static_cast<s32>(dst.width) &&
-                             copy.dst_y1 == static_cast<s32>(dst.height);
-    if (!is_volume(src) || !is_volume(dst) || !whole_slice || src.format != dst.format ||
-        src.width != dst.width || src.height != dst.height) {
-        return false;
-    }
-    const auto format = VideoCore::Surface::PixelFormatFromRenderTargetFormat(src.format);
-    struct Slice {
-        ImageId id;
-        s32 depth;
-    };
-    const auto find_slice = [&](const Fermi2D::Surface& surface) -> std::optional<Slice> {
-        std::optional<Slice> found;
-        const GPUVAddr address = surface.Address();
-        ForEachImageInRegionGPU(channel_state->gpu_memory.GetID(), address, 1,
-                                [&](ImageId id, Image& image) {
-            if (image.info.type != ImageType::e3D || image.info.format != format ||
-                image.info.size.width != surface.width ||
-                image.info.size.height != surface.height ||
-                image.info.size.depth != surface.depth || address < image.gpu_addr) {
-                return false;
-            }
-            const auto offset = static_cast<u32>(address - image.gpu_addr);
-            const auto it = std::ranges::find(image.slice_offsets, offset);
-            if (it == image.slice_offsets.end()) {
-                return false;
-            }
-            const SubresourceBase base =
-                image.slice_subresources[std::distance(image.slice_offsets.begin(), it)];
-            if (base.level != 0) {
-                return false;
-            }
-            found = Slice{id, base.layer};
-            return true;
-        });
-        return found;
-    };
-    const auto src_slice = find_slice(src);
-    const auto dst_slice = find_slice(dst);
-    if (!src_slice || !dst_slice || src_slice->id == dst_slice->id) {
-        static u32 reported{};
-        if (reported++ < 16) {
-            LOG_WARNING(HW_GPU, "2D copy between 3D surfaces {:#x} -> {:#x} without cached volumes",
-                        src.Address(), dst.Address());
-        }
-        return false;
-    }
-    runtime.FlushDeferredClear();
-    PrepareImage(src_slice->id, false, false);
-    PrepareImage(dst_slice->id, true, false);
-    const ImageCopy slice_copy{
-        .src_subresource = {.base_level = 0, .base_layer = 0, .num_layers = 1},
-        .dst_subresource = {.base_level = 0, .base_layer = 0, .num_layers = 1},
-        .src_offset = {0, 0, src_slice->depth},
-        .dst_offset = {0, 0, dst_slice->depth},
-        .extent = {src.width, src.height, 1},
-    };
-    runtime.CopyImage(slot_images[dst_slice->id], slot_images[src_slice->id],
-                      std::span{&slice_copy, 1});
-    return true;
-}
-
 template <class P>
 bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
                                 const Tegra::Engines::Fermi2D::Surface& src,
@@ -1205,9 +1157,6 @@ bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
     // occlusion depth, blits the scene depth over it, and reads it back during the layer draw.
     // GetFramebufferId only flushes when it creates a framebuffer, so the bug starts on the
     // second frame. Texture cache copies bypass render passes and keep stream order here.
-    if (CopyVolumeSlice(dst, src, copy)) {
-        return true;
-    }
     // Only when the copy proceeds: a rejected blit writes nothing and must not realize the
     // clear ahead of the next draw that consumes it as its load-op. GetBlitImages cannot
     // invalidate the parked clear: framebuffer removal flushes first (RemoveFramebuffers).
@@ -1316,8 +1265,7 @@ bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
 
 template <class P>
 std::optional<VideoCore::GameDlssProbe> TextureCache<P>::ProbeGameDlssOutput(
-    const Tegra::Engines::Fermi2D::Surface& dst, const Tegra::Engines::Fermi2D::Surface& src,
-    std::optional<std::array<u32, 2>> src_region) {
+    const Tegra::Engines::Fermi2D::Surface& dst, const Tegra::Engines::Fermi2D::Surface& src) {
     if constexpr (FRAMEBUFFER_BLITS) {
         return std::nullopt;
     } else {
@@ -1364,7 +1312,7 @@ std::optional<VideoCore::GameDlssProbe> TextureCache<P>::ProbeGameDlssOutput(
             return std::nullopt;
         }
         return runtime.ProbeGameDlssOutput(slot_image_views[*src_view],
-                                           slot_image_views[*dst_view], src_region);
+                                           slot_image_views[*dst_view]);
     }
 }
 
@@ -1375,8 +1323,7 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
                                       const Tegra::Texture::TICEntry* depth,
                                       std::array<f32, 2> jitter, std::array<f32, 2> motion_scale,
                                       bool use_history,
-                                      std::optional<std::array<u32, 2>> render_region,
-                                      const std::pair<ImageInfo, GPUVAddr>* depth_target) {
+                                      std::optional<std::array<u32, 2>> render_region) {
     if constexpr (FRAMEBUFFER_BLITS) {
         return false;
     } else {
@@ -1405,11 +1352,8 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         // The depth only feeds NVIDIA DLSS and FSR 3.1 (looked up only when they can run); without
         // it the stand-in runs.
         ImageId depth_id{};
-        const GPUVAddr depth_address =
-            depth_target ? depth_target->second : depth ? depth->Address() : GPUVAddr{};
-        if (use_history && depth_address && motion_id && runtime.WantsTemporalUpscaleDepth()) {
-            depth_id = FindOrInsertImage(depth_target ? depth_target->first : ImageInfo(*depth),
-                                         depth_address, RelaxedOptions{});
+        if (use_history && depth && motion_id && runtime.WantsTemporalUpscaleDepth()) {
+            depth_id = FindOrInsertImage(ImageInfo(*depth), depth->Address(), RelaxedOptions{});
             if (!depth_id) {
                 return false;
             }
@@ -1424,13 +1368,8 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         PrepareImage(dst_id, true, false);
         if (depth_id) {
             PrepareImage(depth_id, false, false);
-            const PixelFormat depth_format = slot_images[depth_id].info.format;
-            const bool depth_format_ok =
-                depth_format == PixelFormat::D32_FLOAT ||
-                (depth_target && (depth_format == PixelFormat::D24_UNORM_S8_UINT ||
-                                  depth_format == PixelFormat::X8_D24_UNORM ||
-                                  depth_format == PixelFormat::D32_FLOAT_S8_UINT));
-            if (slot_images[depth_id].info.num_samples != 1 || !depth_format_ok) {
+            if (slot_images[depth_id].info.num_samples != 1 ||
+                slot_images[depth_id].info.format != PixelFormat::D32_FLOAT) {
                 return false;
             }
         }
@@ -1491,11 +1430,10 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         }
         ImageViewId depth_view{};
         if (depth_id) {
-            if (const std::optional base = slot_images[depth_id].TryFindBase(depth_address)) {
+            if (const std::optional base = slot_images[depth_id].TryFindBase(depth->Address())) {
                 const SubresourceRange range{.base = *base, .extent = {1, 1}};
                 depth_view = FindOrEmplaceImageView(
-                    depth_id, ImageViewInfo(ImageViewType::e2D, slot_images[depth_id].info.format,
-                                            range));
+                    depth_id, ImageViewInfo(ImageViewType::e2D, PixelFormat::D32_FLOAT, range));
             }
             if (!depth_view) {
                 return false;
@@ -3626,6 +3564,7 @@ void TextureCache<P>::TrackImage(ImageBase& image, ImageId image_id) {
     image.flags |= ImageFlagBits::Tracked;
     if (False(image.flags & ImageFlagBits::Sparse)) {
         if (image.cpu_addr < ~(1ULL << 40)) {
+            page_filter.Mark(image.cpu_addr, image.guest_size_bytes);
             device_memory.UpdatePagesCachedCount(image.cpu_addr, image.guest_size_bytes, 1);
         }
         return;
@@ -3638,12 +3577,14 @@ void TextureCache<P>::TrackImage(ImageBase& image, ImageId image_id) {
             const auto& map = slot_map_views[map_view_id];
             const DAddr cpu_addr = map.cpu_addr;
             const std::size_t size = map.size;
+            page_filter.Mark(cpu_addr, size);
             device_memory.UpdatePagesCachedCount(cpu_addr, size, 1);
         }
         return;
     }
     ForEachSparseSegment(image,
                          [this]([[maybe_unused]] GPUVAddr gpu_addr, DAddr cpu_addr, size_t size) {
+                             page_filter.Mark(cpu_addr, size);
                              device_memory.UpdatePagesCachedCount(cpu_addr, size, 1);
                          });
 }
