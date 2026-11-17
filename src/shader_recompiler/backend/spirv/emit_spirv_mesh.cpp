@@ -317,6 +317,14 @@ Id EmitIsbeRead(EmitContext& ctx, Id address) {
                         word);
 }
 
+Id EmitIsbeReadOutput(EmitContext& ctx, Id address) {
+    if (ctx.stage != Stage::Task) {
+        throw NotImplementedException("Stage buffer output read outside task programs");
+    }
+    const Id index{ctx.OpShiftRightLogical(ctx.U32[1], address, ctx.Const(2U))};
+    return ctx.OpLoad(ctx.U32[1], PayloadWord(ctx, index));
+}
+
 void EmitIsbeWriteAttribute(EmitContext& ctx, Id address, Id value) {
     const Id index{ctx.OpShiftRightLogical(ctx.U32[1], address, ctx.Const(2U))};
     if (ctx.stage == Stage::Task) {

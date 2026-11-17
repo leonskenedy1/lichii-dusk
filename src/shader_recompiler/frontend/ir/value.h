@@ -231,6 +231,8 @@ public:
     }
 
 private:
+    /// Store an identity of an immediate as the immediate itself in PHI operands.
+    [[nodiscard]] static Value PhiOperand(const Value& value);
     struct NonTriviallyDummy {
         NonTriviallyDummy() noexcept {}
     };
