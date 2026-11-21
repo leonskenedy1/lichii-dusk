@@ -23,6 +23,10 @@
 #include <cstring>
 #include <string>
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 #include "common/dkb_cpu_trace.h"
 #include "common/logging.h"
 #include "common/settings.h"
@@ -919,6 +923,9 @@ void GpuSplit::BackLoop(std::stop_token stop_token) {
     const Common::DkbCpuTrace::Registration cpu_trace{Common::DkbCpuTrace::Role::GpuBack};
     const StutterTrace::ThreadScope stutter_thread{StutterTrace::Thread::Back};
     Common::SetCurrentThreadName("GPUBack");
+#if defined(TRACY_ENABLE)
+    tracy::SetThreadName("GPU Back");
+#endif
     on_back_thread = true;
     back_running.store(true, std::memory_order_release);
     Common::SetCurrentThreadPriority(Common::ThreadPriority::Critical);

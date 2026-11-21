@@ -1360,4 +1360,8 @@ if (ENABLE_LTO AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT MSVC)
     set_source_files_properties(hle/kernel/kernel.cpp PROPERTIES COMPILE_OPTIONS -fno-lto)
 endif()
 
+if (LICHII_ENABLE_TRACY)
+    target_link_libraries(core PRIVATE Tracy::TracyClient)
+endif()
+
 create_target_directory_groups(core)

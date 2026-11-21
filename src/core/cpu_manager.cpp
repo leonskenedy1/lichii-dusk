@@ -9,6 +9,10 @@
 
 #include "core/cpu_manager.h"
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 #include "common/dkb_cpu_trace.h"
 #include "common/fiber.h"
 #include "common/scope_exit.h"
@@ -209,6 +213,9 @@ void CpuManager::RunThread(std::stop_token token, std::size_t core) {
     system.RegisterCoreThread(core);
     std::string name = is_multicore ? ("CPUCore_" + std::to_string(core)) : std::string{"CPUThread"};
     Common::SetCurrentThreadName(name.c_str());
+#if defined(TRACY_ENABLE)
+    tracy::SetThreadName(name.c_str());
+#endif
     Common::SetCurrentThreadPriority(Common::ThreadPriority::Critical);
     Common::SetCurrentThreadToPerformanceCores();
     if (Settings::values.pin_gpu_threads.GetValue()) {

@@ -10,6 +10,10 @@
 #include <new>
 #include <utility>
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 #include "game_settings.h"
 #include "common/cpu_features.h"
 #include "audio_core/audio_core.h"
@@ -103,6 +107,9 @@ static_assert(std::atomic<u64>::is_always_lock_free);
 std::array<std::atomic<u64>, 4096> g_nx2_present_times_ns{};
 
 void RecordGuestPresent() {
+#if defined(TRACY_ENABLE)
+    FrameMarkNamed("Guest Present");
+#endif
     const u64 present = g_nx2_present_count.fetch_add(1, std::memory_order_relaxed) + 1;
     const u64 present_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::steady_clock::now().time_since_epoch())

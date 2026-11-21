@@ -586,6 +586,30 @@ message(STATUS "Platform Libraries: ${PLATFORM_LIBRARIES}")
 
 add_subdirectory(externals)
 
+# Optional Tracy instrumentation for CPU profiling. Keep it enabled in this profiling fork;
+# it is on-demand and only accepts local connections.
+option(LICHII_ENABLE_TRACY "Enable Tracy CPU profiling" ON)
+if (LICHII_ENABLE_TRACY)
+    include(FetchContent)
+
+    set(TRACY_STATIC ON CACHE BOOL "" FORCE)
+    set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
+    set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
+    set(TRACY_NO_BROADCAST ON CACHE BOOL "" FORCE)
+    set(TRACY_ONLY_LOCALHOST ON CACHE BOOL "" FORCE)
+    set(TRACY_NO_SAMPLING OFF CACHE BOOL "" FORCE)
+    set(TRACY_NO_CONTEXT_SWITCH OFF CACHE BOOL "" FORCE)
+    set(TRACY_NO_SYSTEM_TRACING OFF CACHE BOOL "" FORCE)
+
+    FetchContent_Declare(
+        tracy
+        GIT_REPOSITORY https://github.com/wolfpld/tracy.git
+        GIT_TAG v0.15.0
+        GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(tracy)
+endif()
+
 # pass targets from externals
 # TODO(crueter): CPMUtil Propagate func?
 find_package(enet)

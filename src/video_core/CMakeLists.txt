@@ -729,4 +729,8 @@ if (ENABLE_NVIDIA_DLSS)
     message(STATUS "NVIDIA DLSS through Streamline: ${STREAMLINE_INCLUDE_DIR}")
 endif()
 
+if (LICHII_ENABLE_TRACY)
+    target_link_libraries(video_core PRIVATE Tracy::TracyClient)
+endif()
+
 create_target_directory_groups(video_core)

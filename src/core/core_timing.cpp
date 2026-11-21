@@ -11,6 +11,11 @@
 #include <string>
 #include <tuple>
 #include <vector>
+
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 #include "common/cpu_features.h"
 #include "common/cpu_features.h"
 #include "common/core_pinning.h"
@@ -145,6 +150,9 @@ void CoreTiming::Initialize(std::function<void()>&& on_thread_init_) {
     if (is_multicore) {
         timer_thread = std::jthread([this](std::stop_token stop_token) {
             Common::SetCurrentThreadName("HostTiming");
+#if defined(TRACY_ENABLE)
+            tracy::SetThreadName("HostTiming");
+#endif
             Common::SetCurrentThreadPriority(Common::ThreadPriority::VeryHigh);
             Common::SetCurrentThreadToPerformanceCores();
             on_thread_init();

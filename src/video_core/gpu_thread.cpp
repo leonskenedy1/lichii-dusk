@@ -6,6 +6,10 @@
 #include <chrono>
 #include <thread>
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 #ifdef __linux__
 #include <sys/prctl.h>
 #endif
@@ -61,6 +65,9 @@ void ThreadManager::StartThread(VideoCore::RendererBase& renderer, Core::Fronten
         const VideoCommon::StutterTrace::ThreadScope stutter_thread{
             VideoCommon::StutterTrace::Thread::Front};
         Common::SetCurrentThreadName("GPU");
+#if defined(TRACY_ENABLE)
+        tracy::SetThreadName("GPU Front");
+#endif
         VideoCommon::GpuSplit::MarkGpuThread();
 #ifdef __linux__
         // The pending-channel waits below sleep 500 us; the default timer slack adds up to 50 more.
