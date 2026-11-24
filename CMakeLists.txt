@@ -594,9 +594,13 @@ if (LICHII_ENABLE_TRACY)
 
     set(TRACY_STATIC ON CACHE BOOL "" FORCE)
     set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
-    set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
+    # Record from process startup. On-demand connection can begin while a fiber
+    # or a scoped zone is already active, splitting its enter/leave events.
+    set(TRACY_ON_DEMAND OFF CACHE BOOL "" FORCE)
     set(TRACY_NO_BROADCAST ON CACHE BOOL "" FORCE)
     set(TRACY_ONLY_LOCALHOST ON CACHE BOOL "" FORCE)
+    # Report Common::Fiber context switches to Tracy.
+    set(TRACY_FIBERS ON CACHE BOOL "" FORCE)
     # Keep the complementary CPU capture backends available as well. These are
     # separate from ZoneScoped instrumentation and may require elevated OS rights.
     set(TRACY_NO_CALLSTACK OFF CACHE BOOL "" FORCE)
@@ -605,8 +609,6 @@ if (LICHII_ENABLE_TRACY)
     set(TRACY_NO_CONTEXT_SWITCH OFF CACHE BOOL "" FORCE)
     set(TRACY_NO_WAIT_STACKS OFF CACHE BOOL "" FORCE)
     set(TRACY_NO_SYSTEM_TRACING OFF CACHE BOOL "" FORCE)
-    # Guest threads are cooperatively scheduled through Common::Fiber.
-    set(TRACY_FIBERS ON CACHE BOOL "" FORCE)
 
     FetchContent_Declare(
         tracy
