@@ -33,6 +33,10 @@
 #include "video_core/nx2_profile.h"
 #include "video_core/rasterizer_interface.h"
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 namespace VideoCommon {
 
 class FenceBase {
@@ -267,6 +271,9 @@ private:
 
     void ReleaseThreadFunc(std::stop_token stop_token) {
         Common::SetCurrentThreadName("GPUFencingThread");
+#if defined(TRACY_ENABLE)
+        tracy::SetThreadName("GPU Fencing");
+#endif
         Common::SetCurrentThreadPriority(Common::ThreadPriority::High);
         Common::SetCurrentThreadToPerformanceCores();
 
@@ -304,6 +311,9 @@ private:
         };
         while (!stop_token.stop_requested()) {
             {
+#if defined(TRACY_ENABLE)
+                ZoneScopedN("GPU fence queue wait");
+#endif
                 std::unique_lock lock(guard);
                 cv.wait(lock, [&] {
                     fence_thread_waiting = !stop_token.stop_requested() && fences.empty();
@@ -315,6 +325,9 @@ private:
                 }
                 take_front();
             }
+#if defined(TRACY_ENABLE)
+            ZoneScopedN("GPU fence release batch");
+#endif
             if (!batch.front().fence->IsStubbed()) {
                 WaitFence(batch.front().fence);
             }

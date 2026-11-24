@@ -19,6 +19,10 @@
 #include "common/thread.h"
 #include "common/unique_function.h"
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 namespace Common {
 
 template <class StateType = void>
@@ -41,6 +45,9 @@ public:
         : workers_queued{num_workers}, thread_name{std::move(name)} {
         const auto lambda = [this, func, placement](std::stop_token stop_token) {
             Common::SetCurrentThreadName(thread_name.c_str());
+#if defined(TRACY_ENABLE)
+            tracy::SetThreadName(thread_name.c_str());
+#endif
             if (placement != ThreadPlacement::Default) {
                 Common::SetCurrentThreadPriority(ThreadPriority::Low);
             }
@@ -73,8 +80,14 @@ public:
                         requests.pop();
                     }
                     if constexpr (with_state) {
+#if defined(TRACY_ENABLE)
+                        ZoneScopedN("Thread worker task");
+#endif
                         task(&state);
                     } else {
+#if defined(TRACY_ENABLE)
+                        ZoneScopedN("Thread worker task");
+#endif
                         task();
                     }
                     // Draining an executed task includes releasing its captured resources.

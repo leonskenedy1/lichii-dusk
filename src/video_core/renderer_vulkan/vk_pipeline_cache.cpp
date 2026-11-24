@@ -26,6 +26,10 @@
 #include <thread>
 #include <unordered_set>
 #include <vector>
+
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
 #include "common/cityhash.h"
 #include "common/fs/file_lock.h"
 #include "common/settings.h"
@@ -2710,6 +2714,9 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
     std::span<Shader::Environment* const> envs, PipelineStatistics* statistics,
     bool build_in_parallel, std::shared_ptr<ShaderPools> emit_pools,
     ParallelTranslation* parallel) try {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Vulkan graphics pipeline build");
+#endif
     auto hash = key.Hash();
     LOG_DEBUG(Render_Vulkan, "{:#016x}", hash);
     // Declared before the programs, whose IR they hold
@@ -3423,6 +3430,9 @@ void PipelineCache::WarnKeptPointer(size_t program, u64 slot) const {
 
 std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
     const VideoCommon::EvictedPointerSlots::Slots* keep_pointers, bool evicted) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Vulkan graphics pipeline cache miss");
+#endif
     const VideoCommon::Nx2Profile::Scope profile_scope{
         VideoCommon::Nx2Profile::Zone::GraphicsPipelineMiss};
     const auto begin = std::chrono::steady_clock::now();
@@ -3537,6 +3547,9 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline(
 ComputePipelineCacheEntry PipelineCache::CreateComputePipeline(const ComputePipelineCacheKey& key,
                                                                const ShaderInfo* shader,
                                                                std::span<const u64> keep_pointers) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Vulkan compute pipeline cache miss");
+#endif
     const VideoCommon::Nx2Profile::Scope profile_scope{
         VideoCommon::Nx2Profile::Zone::ComputePipelineMiss};
     const auto begin = std::chrono::steady_clock::now();
@@ -3590,6 +3603,9 @@ ComputePipelineCacheEntry PipelineCache::CreateComputePipeline(
     ShaderPools& pools, const ComputePipelineCacheKey& key, Shader::Environment& env,
     PipelineStatistics* statistics, bool build_in_parallel,
     std::shared_ptr<ShaderPools> emit_pools) try {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Vulkan compute pipeline build");
+#endif
     SCOPE_EXIT {
         if (emit_pools) {
             ReturnPools(std::move(emit_pools));

@@ -597,8 +597,13 @@ if (LICHII_ENABLE_TRACY)
     set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
     set(TRACY_NO_BROADCAST ON CACHE BOOL "" FORCE)
     set(TRACY_ONLY_LOCALHOST ON CACHE BOOL "" FORCE)
+    # Keep the complementary CPU capture backends available as well. These are
+    # separate from ZoneScoped instrumentation and may require elevated OS rights.
+    set(TRACY_NO_CALLSTACK OFF CACHE BOOL "" FORCE)
+    set(TRACY_NO_CODE_TRANSFER OFF CACHE BOOL "" FORCE)
     set(TRACY_NO_SAMPLING OFF CACHE BOOL "" FORCE)
     set(TRACY_NO_CONTEXT_SWITCH OFF CACHE BOOL "" FORCE)
+    set(TRACY_NO_WAIT_STACKS OFF CACHE BOOL "" FORCE)
     set(TRACY_NO_SYSTEM_TRACING OFF CACHE BOOL "" FORCE)
 
     FetchContent_Declare(

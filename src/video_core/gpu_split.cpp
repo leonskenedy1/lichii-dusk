@@ -944,6 +944,9 @@ void GpuSplit::BackLoop(std::stop_token stop_token) {
         Nx2Profile::Report("GPU back thread", true);
         u64 available = published.load(std::memory_order_acquire);
         if (available == read_position) {
+#if defined(TRACY_ENABLE)
+            ZoneScopedN("GPU Back idle wait");
+#endif
             Nx2Profile::Scope scope{Nx2Profile::Zone::SplitWait};
             if (idle_trace && idle_since == 0) {
                 idle_since = BackIdleTrace::Now();
@@ -1001,6 +1004,9 @@ void GpuSplit::BackLoop(std::stop_token stop_token) {
         u64 last_store = read_position;
         // Before any entry runs, so a front that sees these entries consumed also sees this.
         back_quiet.store(false, std::memory_order_seq_cst);
+#if defined(TRACY_ENABLE)
+        ZoneScopedN("GPU Back command batch");
+#endif
         while (read_position != available) {
             const size_t index = read_position & RingMask;
             back_entry_start = read_position;

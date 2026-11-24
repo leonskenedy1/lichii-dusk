@@ -10,6 +10,10 @@
 #include <immintrin.h>
 #endif
 #include "common/settings.h"
+
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
 #include "core/arm/dynarmic/arm_dynarmic.h"
 #include "core/arm/dynarmic/arm_dynarmic_64.h"
 #include "core/arm/dynarmic/dynarmic_exclusive_monitor.h"
@@ -550,6 +554,9 @@ void ArmDynarmic64::MakeJit(Common::PageTable* page_table, std::size_t address_s
 }
 
 HaltReason ArmDynarmic64::RunThread(Kernel::KThread* thread) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Dynarmic A64 RunThread");
+#endif
     m_jit->ClearExclusiveState();
     if (m_core_index >= g_jit_counters.size()) {
         return TranslateHaltReason(m_jit->Run());
@@ -582,6 +589,9 @@ HaltReason ArmDynarmic64::RunThread(Kernel::KThread* thread) {
 }
 
 HaltReason ArmDynarmic64::StepThread(Kernel::KThread* thread) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Dynarmic A64 StepThread");
+#endif
     m_jit->ClearExclusiveState();
     return TranslateHaltReason(m_jit->Step());
 }

@@ -114,6 +114,9 @@ void ThreadManager::StartThread(VideoCore::RendererBase& renderer, Core::Fronten
                 bool resumed = false;
                 {
                     Profile::Scope scope{Profile::Zone::ResumePending};
+#if defined(TRACY_ENABLE)
+                    ZoneScopedN("GPU Front resume pending channels");
+#endif
                     resumed = scheduler.ResumePending(system.GPU());
                 }
                 if (split.Active()) {
@@ -150,6 +153,9 @@ void ThreadManager::StartThread(VideoCore::RendererBase& renderer, Core::Fronten
                     // work behind them: with 1 ms sleeps the present waited ~17 ms a frame in
                     // Kokiri village, with 50 us ~1 ms.
                     Profile::Scope scope{Profile::Zone::PendingSleep};
+#if defined(TRACY_ENABLE)
+                    ZoneScopedN("GPU Front pending-channel wait");
+#endif
                     split.SettleIdleBack();
                     const auto now = std::chrono::steady_clock::now();
                     bool woken = false;
@@ -186,6 +192,9 @@ void ThreadManager::StartThread(VideoCore::RendererBase& renderer, Core::Fronten
             } else {
                 Profile::Scope scope{Profile::Zone::Idle};
                 BackIdleTrace::SetFrontState(FrontState::QueueEmpty);
+#if defined(TRACY_ENABLE)
+                ZoneScopedN("GPU Front command-queue wait");
+#endif
                 state.queue.PopWait(next, stop_token);
                 BackIdleTrace::SetFrontState(FrontState::Parse);
             }
@@ -216,6 +225,9 @@ void ThreadManager::StartThread(VideoCore::RendererBase& renderer, Core::Fronten
                                 VideoCommon::GpuSplit::FastDrawNeutral,
                                 VideoCommon::GpuSplit::Writes::Noted);
                     Profile::Scope scope{Profile::Zone::Push};
+#if defined(TRACY_ENABLE)
+                    ZoneScopedN("GPU Front push command list");
+#endif
                     scheduler.Push(system.GPU(), submit_list->channel, std::move(submit_list->entries));
                 } else if (std::holds_alternative<GPUTickCommand>(next.data)) {
                     // TickWork ends fast draw reuse itself when it runs a request.

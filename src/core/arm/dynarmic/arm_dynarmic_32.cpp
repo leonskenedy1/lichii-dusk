@@ -4,6 +4,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/settings.h"
+
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
 #include "core/arm/dynarmic/arm_dynarmic.h"
 #include "core/arm/dynarmic/arm_dynarmic_32.h"
 #include "core/arm/dynarmic/dynarmic_cp15.h"
@@ -322,11 +326,17 @@ bool ArmDynarmic32::IsInThumbMode() const {
 }
 
 HaltReason ArmDynarmic32::RunThread(Kernel::KThread* thread) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Dynarmic A32 RunThread");
+#endif
     m_jit->ClearExclusiveState();
     return TranslateHaltReason(m_jit->Run());
 }
 
 HaltReason ArmDynarmic32::StepThread(Kernel::KThread* thread) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Dynarmic A32 StepThread");
+#endif
     m_jit->ClearExclusiveState();
     return TranslateHaltReason(m_jit->Step());
 }

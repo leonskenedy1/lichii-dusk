@@ -181,6 +181,9 @@ void CoreTiming::Initialize(std::function<void()>&& on_thread_init_) {
 }
 
 void CoreTiming::WaitForEvent(s64 next_time, std::optional<s64> one_shot_time) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("CoreTiming host wait");
+#endif
     const s64 start = GetGlobalTimeNs().count();
     if (next_time <= start) {
         return;
@@ -397,6 +400,9 @@ std::optional<s64> CoreTiming::Advance() {
 }
 
 CoreTiming::NextEvents CoreTiming::AdvanceEvents() {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("CoreTiming::AdvanceEvents");
+#endif
     std::scoped_lock lock{advance_lock, basic_lock};
     global_timer = GetGlobalTimeNs().count();
 
@@ -419,7 +425,12 @@ CoreTiming::NextEvents CoreTiming::AdvanceEvents() {
 
                 basic_lock.unlock();
 
-                event_type->callback(evt_time, late);
+                {
+#if defined(TRACY_ENABLE)
+                    ZoneScopedN("CoreTiming one-shot callback");
+#endif
+                    event_type->callback(evt_time, late);
+                }
 
                 basic_lock.lock();
             } else {
@@ -434,7 +445,13 @@ CoreTiming::NextEvents CoreTiming::AdvanceEvents() {
                         ? (std::min)(late.count(),
                                      GetGlobalTimeNs().count() - static_cast<s64>(pause_end_time))
                         : late.count())};
-                const auto new_schedule_time{event_type->callback(evt_time, late_since_pause)};
+                std::optional<std::chrono::nanoseconds> new_schedule_time;
+                {
+#if defined(TRACY_ENABLE)
+                    ZoneScopedN("CoreTiming looping callback");
+#endif
+                    new_schedule_time = event_type->callback(evt_time, late_since_pause);
+                }
 
                 basic_lock.lock();
 

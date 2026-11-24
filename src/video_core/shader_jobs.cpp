@@ -5,6 +5,10 @@
 #include <optional>
 #include <utility>
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 #include "common/literals.h"
 #include "common/logging.h"
 #include "common/memory_detect.h"
@@ -158,6 +162,9 @@ ShaderJobScheduler::ShaderJobScheduler(const ShaderJobConfig& config)
     const auto start{[this](std::string name, bool driver) {
         threads.emplace_back([this, name = std::move(name), driver] {
             Common::SetCurrentThreadName(name.c_str());
+#if defined(TRACY_ENABLE)
+            tracy::SetThreadName(name.c_str());
+#endif
             Common::SetCurrentThreadPriority(Common::ThreadPriority::Low);
             Common::SetCurrentThreadToBackgroundWork();
             Worker(driver);
@@ -421,6 +428,9 @@ void ShaderJobScheduler::StartStage(ShaderJobState& job, bool driver, Clock::tim
 }
 
 void ShaderJobScheduler::RunCpu(const JobPtr& job, bool run_driver_here) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Shader CPU compilation job");
+#endif
     ShaderDriverStage driver;
     std::exception_ptr exception;
     try {
@@ -481,6 +491,9 @@ void ShaderJobScheduler::RunCpu(const JobPtr& job, bool run_driver_here) {
 }
 
 void ShaderJobScheduler::RunDriver(const JobPtr& job) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Shader driver compilation job");
+#endif
     std::exception_ptr exception;
     try {
         if (job->work.driver) {

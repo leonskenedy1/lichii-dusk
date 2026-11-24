@@ -5,6 +5,10 @@
 #include <thread>
 #include <utility>
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 #include "common/fs/path_util.h"
 #include "common/logging.h"
 #include "common/thread.h"
@@ -67,6 +71,9 @@ WriterStats CacheWriter::Stats() const {
 
 void CacheWriter::Run(std::stop_token stop) {
     Common::SetCurrentThreadName("ShaderCacheWriter");
+#if defined(TRACY_ENABLE)
+    tracy::SetThreadName("Shader Cache Writer");
+#endif
     std::unique_lock lock{mutex};
     while (!stop.stop_requested()) {
         const auto now = Clock::now();
@@ -103,6 +110,9 @@ void CacheWriter::Run(std::stop_token stop) {
 }
 
 void CacheWriter::WriteQueued(std::unique_lock<std::mutex>& lock) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("Shader cache write batch");
+#endif
     std::vector<u8> batch = std::exchange(queued, {});
     const u64 count = std::exchange(queued_records, 0);
     const auto first = first_queued;

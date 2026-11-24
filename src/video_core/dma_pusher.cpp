@@ -14,6 +14,10 @@
 #include <utility>
 #include <vector>
 
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
+
 #if defined(_M_X64) || defined(__x86_64__)
 #include <immintrin.h>
 #endif
@@ -207,6 +211,9 @@ private:
 
     void Loop(std::stop_token token) {
         Common::SetCurrentThreadName("GPUSnapshot");
+#if defined(TRACY_ENABLE)
+        tracy::SetThreadName("GPU Snapshot");
+#endif
         Common::SetCurrentThreadPriority(Common::ThreadPriority::High);
         u64 done = 0;
         while (!token.stop_requested()) {
@@ -233,6 +240,9 @@ private:
     }
 
     static void Copy(const Job& job) {
+#if defined(TRACY_ENABLE)
+        ZoneScopedN("GPU snapshot copy");
+#endif
         CommandList& list = *job.list;
         for (size_t i = 0; i < list.command_lists.size() && i < list.submitted_offsets.size();
              ++i) {

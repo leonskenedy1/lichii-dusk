@@ -7,6 +7,10 @@
 #include <chrono>
 #include <cstdlib>
 #include <thread>
+
+#if defined(TRACY_ENABLE)
+#include <tracy/Tracy.hpp>
+#endif
 #include "common/logging.h"
 #include "common/scope_exit.h"
 #include "common/settings.h"
@@ -29,6 +33,9 @@ PhysicalCore::PhysicalCore(KernelCore& kernel, std::size_t core_index)
 PhysicalCore::~PhysicalCore() = default;
 
 void PhysicalCore::RunThread(KernelCore& kernel, Kernel::KThread* thread) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("PhysicalCore::RunThread");
+#endif
     auto* process = thread->GetOwnerProcess();
     auto& system = kernel.System();
     auto* interface = process->GetArmInterface(m_core_index);
@@ -98,12 +105,18 @@ void PhysicalCore::RunThread(KernelCore& kernel, Kernel::KThread* thread) {
             }
 
             if (thread->GetStepState() == StepState::StepPending) {
+#if defined(TRACY_ENABLE)
+                ZoneScopedN("Guest CPU single-step");
+#endif
                 hr = interface->StepThread(thread);
 
                 if (True(hr & Core::HaltReason::StepThread)) {
                     thread->SetStepState(StepState::StepPerformed);
                 }
             } else {
+#if defined(TRACY_ENABLE)
+                ZoneScopedN("Guest CPU execution");
+#endif
                 hr = interface->RunThread(thread);
             }
 
@@ -161,6 +174,9 @@ void PhysicalCore::RunThread(KernelCore& kernel, Kernel::KThread* thread) {
         // Handle system calls.
         if (supervisor_call) {
             // Perform call.
+#if defined(TRACY_ENABLE)
+            ZoneScopedN("HLE SVC dispatch");
+#endif
             Svc::Call(system, interface->GetSvcNumber());
             return;
         }
@@ -231,6 +247,9 @@ void PhysicalCore::LogBacktrace(KernelCore& kernel) {
 }
 
 void PhysicalCore::Idle(KernelCore& kernel) {
+#if defined(TRACY_ENABLE)
+    ZoneScopedN("PhysicalCore::Idle");
+#endif
     // Guest job systems hand work between cores many times per frame; blocking at once adds the
     // host's thread wake-up latency to every handoff. EDEN_NX2_IDLE_SPIN_US=<n>: poll for up to
     // that many microseconds before blocking. Switch 2 titles poll 100 us by default outside Android
