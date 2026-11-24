@@ -92,16 +92,23 @@ void Fiber::Exit() {
 
 void Fiber::YieldTo(std::weak_ptr<Fiber> weak_from, Fiber& to) {
     to.impl->guard.lock();
-    to.impl->previous_fiber = weak_from.lock();
+    auto from = weak_from.lock();
+    to.impl->previous_fiber = from;
 
 #if defined(TRACY_ENABLE) && defined(TRACY_FIBERS)
-    // Guest threads and the scheduler are stackful fibers. Tell Tracy which
-    // fiber is being resumed before transferring control so scoped zones may
-    // safely remain open across a context switch. The per-thread host context
-    // is the non-fiber part of the worker thread and must leave fiber mode.
-    if (to.impl->is_thread_fiber) {
+    // A context switch has two independent sides: leave the currently running
+    // guest/scheduler fiber (if any), then enter the destination fiber (if it
+    // is not the OS thread's host context). The scheduler may switch directly
+    // between guest fibers through its switch fiber, so checking only the
+    // destination would leave the previous fiber active and corrupt Tracy's
+    // per-fiber zone stack.
+    if (from && !from->impl->is_thread_fiber) {
         TracyFiberLeave;
-    } else {
+    }
+    if (!to.impl->is_thread_fiber) {
+        // Tracy uses this pointer value as the fiber identity; it does not
+        // dereference the pointer as a string. FiberImpl remains alive while
+        // its context can be resumed.
         TracyFiberEnter(reinterpret_cast<const char*>(to.impl.get()));
     }
 #endif
