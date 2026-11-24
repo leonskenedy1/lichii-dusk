@@ -90,11 +90,11 @@ public:
         return std::unique_lock{execution_mutex};
     }
 
-    enum class FrameMark : u8 { None, Start, End, Both };
+    enum class FrameMarkState : u8 { None, Start, End, Both };
     /// GPU thread, once per present: the frame-end mark this present gets. EDEN_DKB_FRAME_TRACE
     /// marks every present; otherwise only the two presents after RequestGpuBusySample.
-    [[nodiscard]] FrameMark NextFrameMark();
-    void MarkFrameEnd(u64 frame, FrameMark mark);
+    [[nodiscard]] FrameMarkState NextFrameMark();
+    void MarkFrameEnd(u64 frame, FrameMarkState mark);
     /// Any thread: asks for one host GPU timestamp sample of the frame after the next present.
     void RequestGpuBusySample() {
         gpu_busy_marks.store(2, std::memory_order_relaxed);
@@ -629,7 +629,7 @@ private:
     bool trace_gpu_sampling{};
     bool trace_gpu_pending{};
     bool trace_gpu_failed{};
-    FrameMark trace_frame_mark{};
+    FrameMarkState trace_frame_mark{};
     /// The pending sample covers exactly one frame, so its busy time can be shown.
     bool trace_gpu_publish{};
 

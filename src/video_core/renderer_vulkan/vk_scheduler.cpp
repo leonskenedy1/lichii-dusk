@@ -326,19 +326,19 @@ void Scheduler::WaitWorker() {
     std::scoped_lock el{execution_mutex};
 }
 
-Scheduler::FrameMark Scheduler::NextFrameMark() {
+Scheduler::FrameMarkState Scheduler::NextFrameMark() {
     if (Common::DkbFrameTrace::Enabled()) {
-        return FrameMark::Both;
+        return FrameMarkState::Both;
     }
     u32 marks = gpu_busy_marks.load(std::memory_order_relaxed);
     if (marks == 0 ||
         !gpu_busy_marks.compare_exchange_strong(marks, marks - 1, std::memory_order_relaxed)) {
-        return FrameMark::None;
+        return FrameMarkState::None;
     }
-    return marks == 2 ? FrameMark::Start : FrameMark::End;
+    return marks == 2 ? FrameMarkState::Start : FrameMarkState::End;
 }
 
-void Scheduler::MarkFrameEnd(u64 frame, FrameMark mark) {
+void Scheduler::MarkFrameEnd(u64 frame, FrameMarkState mark) {
     Record([this, frame, mark](vk::CommandBuffer) {
         trace_frame_end = frame;
         trace_frame_mark = mark;
@@ -1586,10 +1586,10 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
                 trace_gpu_sampling = false;
                 // A start mark while sampling means the end mark was lost: the sample spans
                 // more than one frame.
-                trace_gpu_publish = trace_frame_mark != FrameMark::Start;
+                trace_gpu_publish = trace_frame_mark != FrameMarkState::Start;
             }
             if (trace_query_pool && !trace_gpu_failed && !trace_gpu_pending &&
-                trace_frame_mark != FrameMark::End &&
+                trace_frame_mark != FrameMarkState::End &&
                 trace_gpu_rate.Ready(std::chrono::steady_clock::now())) {
                 trace_sample_frame = trace_frame_end + 1;
                 trace_gpu_sampling = true;

@@ -579,7 +579,7 @@ void RendererVulkan::Composite(std::span<const Tegra::FramebufferConfig> framebu
 #else
     LogSetupWarnings(device, VideoCore::FrameGenState::UnsupportedBuild);
 #endif
-    if (const auto mark = scheduler.NextFrameMark(); mark != Scheduler::FrameMark::None) {
+    if (const auto mark = scheduler.NextFrameMark(); mark != Scheduler::FrameMarkState::None) {
         scheduler.MarkFrameEnd(++trace_frame, mark);
     }
     scheduler.Flush(*frame->render_ready);
