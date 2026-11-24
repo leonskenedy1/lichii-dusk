@@ -605,6 +605,8 @@ if (LICHII_ENABLE_TRACY)
     set(TRACY_NO_CONTEXT_SWITCH OFF CACHE BOOL "" FORCE)
     set(TRACY_NO_WAIT_STACKS OFF CACHE BOOL "" FORCE)
     set(TRACY_NO_SYSTEM_TRACING OFF CACHE BOOL "" FORCE)
+    # Guest threads are cooperatively scheduled through Common::Fiber.
+    set(TRACY_FIBERS ON CACHE BOOL "" FORCE)
 
     FetchContent_Declare(
         tracy

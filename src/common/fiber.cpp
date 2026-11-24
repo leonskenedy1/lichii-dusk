@@ -6,6 +6,10 @@
 #include <thread>
 #include <mutex>
 
+#if defined(TRACY_ENABLE) && defined(TRACY_FIBERS)
+#include <tracy/Tracy.hpp>
+#endif
+
 #include "common/assert.h"
 #include "common/fiber.h"
 
@@ -89,6 +93,18 @@ void Fiber::Exit() {
 void Fiber::YieldTo(std::weak_ptr<Fiber> weak_from, Fiber& to) {
     to.impl->guard.lock();
     to.impl->previous_fiber = weak_from.lock();
+
+#if defined(TRACY_ENABLE) && defined(TRACY_FIBERS)
+    // Guest threads and the scheduler are stackful fibers. Tell Tracy which
+    // fiber is being resumed before transferring control so scoped zones may
+    // safely remain open across a context switch. The per-thread host context
+    // is the non-fiber part of the worker thread and must leave fiber mode.
+    if (to.impl->is_thread_fiber) {
+        TracyFiberLeave;
+    } else {
+        TracyFiberEnter(reinterpret_cast<const char*>(to.impl.get()));
+    }
+#endif
 
     auto transfer = boost::context::detail::jump_fcontext(to.impl->context, &to);
     // "from" might no longer be valid if the thread was killed

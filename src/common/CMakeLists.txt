@@ -283,6 +283,10 @@ endif()
 target_link_libraries(common PUBLIC fmt::fmt stb::headers Threads::Threads)
 target_link_libraries(common PRIVATE lz4::lz4 zstd::zstd)
 
+if (LICHII_ENABLE_TRACY)
+    target_link_libraries(common PRIVATE Tracy::TracyClient)
+endif()
+
 # Please refer to src/common/demangle.cpp
 if (WIN32)
     target_link_libraries(common PRIVATE LLVM::Demangle)
