@@ -33,9 +33,6 @@ PhysicalCore::PhysicalCore(KernelCore& kernel, std::size_t core_index)
 PhysicalCore::~PhysicalCore() = default;
 
 void PhysicalCore::RunThread(KernelCore& kernel, Kernel::KThread* thread) {
-#if defined(TRACY_ENABLE)
-    ZoneScopedN("PhysicalCore::RunThread");
-#endif
     auto* process = thread->GetOwnerProcess();
     auto& system = kernel.System();
     auto* interface = process->GetArmInterface(m_core_index);
@@ -174,9 +171,6 @@ void PhysicalCore::RunThread(KernelCore& kernel, Kernel::KThread* thread) {
         // Handle system calls.
         if (supervisor_call) {
             // Perform call.
-#if defined(TRACY_ENABLE)
-            ZoneScopedN("HLE SVC dispatch");
-#endif
             Svc::Call(system, interface->GetSvcNumber());
             return;
         }

@@ -98,9 +98,6 @@ void CpuManager::ShutdownThreadFunction(Kernel::KernelCore& kernel) {
 }
 
 void CpuManager::HandleInterrupt(Kernel::KernelCore& kernel) {
-#if defined(TRACY_ENABLE)
-    ZoneScopedN("CPU interrupt handling");
-#endif
     auto core_index = kernel.CurrentPhysicalCoreIndex();
     Kernel::KInterruptManager::HandleInterrupt(kernel, s32(core_index));
 }
@@ -117,9 +114,6 @@ void CpuManager::MultiCoreRunGuestThread(Kernel::KernelCore& kernel) {
     while (true) {
         auto* physical_core = &kernel.CurrentPhysicalCore();
         while (!physical_core->IsInterrupted()) {
-#if defined(TRACY_ENABLE)
-            ZoneScopedN("CPU guest dispatch");
-#endif
             physical_core->RunThread(kernel, thread);
             physical_core = &kernel.CurrentPhysicalCore();
         }
@@ -135,9 +129,6 @@ void CpuManager::MultiCoreRunIdleThread(Kernel::KernelCore& kernel) {
     while (true) {
         auto& physical_core = kernel.CurrentPhysicalCore();
         if (!physical_core.IsInterrupted()) {
-#if defined(TRACY_ENABLE)
-            ZoneScopedN("CPU idle wait");
-#endif
             physical_core.Idle(kernel);
         }
         HandleInterrupt(kernel);
@@ -155,9 +146,6 @@ void CpuManager::SingleCoreRunGuestThread(Kernel::KernelCore& kernel) {
     while (true) {
         auto* physical_core = &kernel.CurrentPhysicalCore();
         if (!physical_core->IsInterrupted()) {
-#if defined(TRACY_ENABLE)
-            ZoneScopedN("CPU guest dispatch");
-#endif
             physical_core->RunThread(kernel, thread);
             physical_core = &kernel.CurrentPhysicalCore();
         }
@@ -174,9 +162,6 @@ void CpuManager::SingleCoreRunGuestThread(Kernel::KernelCore& kernel) {
 void CpuManager::SingleCoreRunIdleThread(Kernel::KernelCore& kernel) {
     kernel.CurrentScheduler()->OnThreadStart(kernel);
     while (true) {
-#if defined(TRACY_ENABLE)
-        ZoneScopedN("Single-core idle scheduling");
-#endif
         PreemptSingleCore(kernel, false);
         system.CoreTiming().AddTicks(1000U);
         idle_count++;

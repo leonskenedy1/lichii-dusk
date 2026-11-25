@@ -594,13 +594,14 @@ if (LICHII_ENABLE_TRACY)
 
     set(TRACY_STATIC ON CACHE BOOL "" FORCE)
     set(TRACY_ENABLE ON CACHE BOOL "" FORCE)
-    # Record from process startup. On-demand connection can begin while a fiber
-    # or a scoped zone is already active, splitting its enter/leave events.
-    set(TRACY_ON_DEMAND OFF CACHE BOOL "" FORCE)
+    # On-demand mode supports reconnecting to the same client for multiple captures.
+    set(TRACY_ON_DEMAND ON CACHE BOOL "" FORCE)
     set(TRACY_NO_BROADCAST ON CACHE BOOL "" FORCE)
     set(TRACY_ONLY_LOCALHOST ON CACHE BOOL "" FORCE)
-    # Report Common::Fiber context switches to Tracy.
-    set(TRACY_FIBERS ON CACHE BOOL "" FORCE)
+    # The emulator's cooperative fibers can migrate between CPU worker threads.
+    # Keep Tracy on native-thread tracks and instrument only scopes that never cross
+    # Fiber::YieldTo boundaries; this avoids mismatched fiber/zone stacks.
+    set(TRACY_FIBERS OFF CACHE BOOL "" FORCE)
     # Keep the complementary CPU capture backends available as well. These are
     # separate from ZoneScoped instrumentation and may require elevated OS rights.
     set(TRACY_NO_CALLSTACK OFF CACHE BOOL "" FORCE)
